@@ -1,0 +1,33 @@
+### Monokai-inspired Bokeh Theme
+# written July 23, 2017 by Luke Canavan
+
+### Here are some Monokai palette colors for Glyph styling
+# @yellow: "#E6DB74"
+# @blue: "#66D9EF"
+# @pink: "#F92672"
+# @purple: "#AE81FF"
+# @brown: "#75715E"
+# @orange: "#FD971F"
+# @light-orange: "#FFD569"
+# @green: "#A6E22E"
+# @sea-green: "#529B2F"
+
+attrs:
+    Axis:
+        axis_line_color: "#49483E"
+        axis_label_text_color: "#888888"
+        major_label_text_color: "#888888"
+        major_tick_line_color: "#49483E"
+        minor_tick_line_color: "#49483E"
+    Grid:
+        grid_line_color: "#49483E"
+    Legend:
+        border_line_color: "#49483E"
+        background_fill_color: "#282828"
+        label_text_color: "#888888"
+    Plot:
+        background_fill_color: "#282828"
+        border_fill_color: "#282828"
+        outline_line_color: "#49483E"
+    Title:
+        text_color: "#CCCCCC"
