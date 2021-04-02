@@ -21,6 +21,8 @@ class DataProvider:
         self._train_subfolder = kwargs.pop("train_subfolder", "train")
         self._test_subfolder = kwargs.pop("test_subfolder", "test")
         self._validation_subfolder = kwargs.pop("validation_subfolder", "valid")
+        self._batch_size = kwargs.pop("batch_size", 64)
+        self._num_workers = kwargs.pop("num_workers", 0)
 
         transform_train = transforms.Compose([
             transforms.Resize(256),
@@ -39,17 +41,27 @@ class DataProvider:
         ])
 
         self._train_loader = DataLoader(
-            datasets.ImageFolder(os.path.join(root_dir, self._train_subfolder),
-                                 transform=transform_train), **kwargs)
+            datasets.ImageFolder(
+                os.path.join(root_dir, self._train_subfolder),
+                transform=transform_train),
+            shuffle=True,
+            batch_size=self._batch_size,
+            num_workers=self._num_workers)
 
         self._validation_loader = DataLoader(
             datasets.ImageFolder(
                 os.path.join(root_dir, self._validation_subfolder),
-                transform=transform_others), **kwargs)
+                transform=transform_others),
+            shuffle=True,
+            batch_size=self._batch_size,
+            num_workers=self._num_workers)
 
         self._test_loader = DataLoader(
             datasets.ImageFolder(os.path.join(root_dir, self._test_subfolder),
-                                 transform=transform_others), **kwargs)
+                                 transform=transform_others),
+            shuffle=True,
+            batch_size=self._batch_size,
+            num_workers=self._num_workers)
 
     @property
     def train(self) -> DataLoader:
