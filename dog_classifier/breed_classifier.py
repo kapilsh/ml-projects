@@ -1,11 +1,11 @@
 import os
 from collections import namedtuple
 
+import click
 from PIL.ImageFile import ImageFile
 from loguru import logger
 import numpy as np
 import torch
-import torchvision.models as models
 from torch import nn, optim
 import torch.nn.functional as functional
 from torchvision import datasets
@@ -100,11 +100,13 @@ class NeuralNet(nn.Module):
 TrainedModel = namedtuple(
     "TrainedModel", ["model", "validation_losses", "optimal_validation_loss"])
 
+TestResult = namedtuple(
+    "TestResult", ["test_loss", "correct_labels", "total_labels"])
 
-class ModelTrainer:
-    def __init__(self, n_epochs: int, data_provider: DataProvider,
+
+class Model:
+    def __init__(self, data_provider: DataProvider,
                  save_path: str, **kwargs):
-        self._n_epoch = n_epochs
         self._data_provider = data_provider
         self._save_path = save_path
         self._criterion = nn.CrossEntropyLoss()
@@ -113,7 +115,7 @@ class ModelTrainer:
         if self._use_gpu:
             logger.info("CUDA is enabled - using GPU")
 
-    def train(self) -> TrainedModel:
+    def train(self, n_epochs) -> TrainedModel:
         neural_net = NeuralNet()
         optimizer = optim.Adam(neural_net.parameters())
         ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -121,7 +123,7 @@ class ModelTrainer:
         validation_losses = []
         min_validation_loss = np.Inf
 
-        for epoch in range(self._n_epoch):
+        for epoch in range(n_epochs):
             validation_loss = self._train_epoch(epoch, neural_net, optimizer)
             validation_losses.append(validation_loss)
             if min_validation_loss > validation_loss:
@@ -172,14 +174,63 @@ class ModelTrainer:
 
         return validation_loss
 
+    def test(self) -> TestResult:
+        model = NeuralNet()
+        model.load_state_dict(torch.load(self._save_path))
+        test_loss = 0
+        correct_labels = 0
+        total_labels = 0
+        model.eval()
+        for batch_idx, data, target in enumerate(self._data_provider.test):
+            # move to GPU
+            if self._use_gpu:
+                data, target = data.cuda(), target.cuda()
+            output = model(data)
+            loss = self._criterion(output, target)
+            test_loss = test_loss + ((loss.data - test_loss) / (batch_idx + 1))
+            pred = output.data.max(1, keepdim=True)[1]
+            correct_labels += np.sum(
+                np.squeeze(pred.eq(target.data.view_as(pred))).cpu().numpy())
+            total_labels += data.size(0)
 
-class ModelTester:
-    def __init__(self, model_path: str, use_gpu: bool = False):
-        self._model = NeuralNet()
-        self._model.load_state_dict(torch.load(model_path))
-        self._use_cuda = torch.cuda.is_available() and use_gpu
-        if self._use_cuda:
-            logger.info("CUDA is enabled - using GPU")
-            self._model = self._model.cuda()
+        return TestResult(test_loss=test_loss, correct_labels=correct_labels,
+                          total_labels=total_labels)
 
-    def test(self):
+
+@click.group()
+def train_cli():
+    pass
+
+
+@train_cli.command()
+@click.option("--data-path", required=True, type=str)
+@click.option("--save-path", required=True, type=str)
+@click.option("--epochs", required=True, type=int)
+@click.option("--gpu/--no-gpu", default=False)
+def train(data_path: str, save_path: str, epochs: int, use_gpu: bool):
+    data_provider = DataProvider(root_dir=data_path)
+    model = Model(data_provider=data_provider, use_gpu=use_gpu,
+                  save_path=save_path)
+    model.train(n_epochs=epochs)
+
+
+@click.group()
+def test_cli():
+    pass
+
+
+@test_cli.command()
+@click.option("--data-path", required=True, type=str)
+@click.option("--save-path", required=True, type=str)
+@click.option("--gpu/--no-gpu", default=False)
+def test(data_path: str, save_path: str, use_gpu: bool):
+    data_provider = DataProvider(root_dir=data_path)
+    model = Model(data_provider=data_provider, use_gpu=use_gpu,
+                  save_path=save_path)
+    model.test()
+
+
+main = click.CommandCollection(sources=[train_cli, test_cli])
+
+if __name__ == '__main__':
+    main()
