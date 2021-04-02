@@ -1,9 +1,6 @@
 import os
-from glob import glob
-import time
-from typing import List
+from collections import namedtuple
 
-import cv2
 from PIL.ImageFile import ImageFile
 from loguru import logger
 import numpy as np
@@ -100,7 +97,11 @@ class NeuralNet(nn.Module):
         return x
 
 
-class Model:
+TrainedModel = namedtuple(
+    "TrainedModel", ["model", "validation_losses", "optimal_validation_loss"])
+
+
+class ModelTrainer:
     def __init__(self, n_epochs: int, data_provider: DataProvider,
                  save_path: str, **kwargs):
         self._n_epoch = n_epochs
@@ -109,8 +110,10 @@ class Model:
         self._criterion = nn.CrossEntropyLoss()
         self._use_gpu = kwargs.pop("use_gpu",
                                    False) and torch.cuda.is_available()
+        if self._use_gpu:
+            logger.info("CUDA is enabled - using GPU")
 
-    def train(self) -> NeuralNet:
+    def train(self) -> TrainedModel:
         neural_net = NeuralNet()
         optimizer = optim.Adam(neural_net.parameters())
         ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -130,7 +133,10 @@ class Model:
                 torch.save(neural_net.state_dict(), self._save_path)
 
         optimal_model = NeuralNet()
-        return optimal_model.load_state_dict(torch.load(self._save_path))
+        optimal_model.load_state_dict(torch.load(self._save_path))
+        return TrainedModel(model=optimal_model,
+                            validation_losses=validation_losses,
+                            optimal_validation_loss=min_validation_loss)
 
     def _train_epoch(self, epoch: int, neural_net: nn.Module,
                      optimizer: optim.Optimizer):
@@ -166,5 +172,14 @@ class Model:
 
         return validation_loss
 
+
+class ModelTester:
+    def __init__(self, model_path: str, use_gpu: bool = False):
+        self._model = NeuralNet()
+        self._model.load_state_dict(torch.load(model_path))
+        self._use_cuda = torch.cuda.is_available() and use_gpu
+        if self._use_cuda:
+            logger.info("CUDA is enabled - using GPU")
+            self._model = self._model.cuda()
+
     def test(self):
-        pass
