@@ -2,7 +2,6 @@ import os
 from collections import namedtuple
 
 import click
-from PIL.ImageFile import ImageFile
 from loguru import logger
 import numpy as np
 import torch
@@ -12,7 +11,9 @@ from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-from dog_classifier.timeit import timeit
+from PIL import ImageFile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class DataProvider:
@@ -23,6 +24,10 @@ class DataProvider:
         self._validation_subfolder = kwargs.pop("validation_subfolder", "valid")
         self._batch_size = kwargs.pop("batch_size", 64)
         self._num_workers = kwargs.pop("num_workers", 0)
+
+        logger.info(f"ROOT_DIR: {self._root_dir}")
+        logger.info(f"BATCH_SIZE: {self._batch_size}")
+        logger.info(f"NUM WORKERS: {self._num_workers}")
 
         transform_train = transforms.Compose([
             transforms.Resize(256),
@@ -59,7 +64,7 @@ class DataProvider:
         self._test_loader = DataLoader(
             datasets.ImageFolder(os.path.join(root_dir, self._test_subfolder),
                                  transform=transform_others),
-            shuffle=True,
+            shuffle=False,
             batch_size=self._batch_size,
             num_workers=self._num_workers)
 
@@ -88,11 +93,11 @@ class NeuralNet(nn.Module):
         super(NeuralNet, self).__init__()
 
         # Conv Layers
-        self.conv1 = nn.Conv2d(3, 16, (3,))
-        self.conv2 = nn.Conv2d(16, 32, (3,))
-        self.conv3 = nn.Conv2d(32, 64, (3,))
-        self.conv4 = nn.Conv2d(64, 128, (3,))
-        self.conv5 = nn.Conv2d(128, 256, (3,))
+        self.conv1 = nn.Conv2d(3, 16, (3, 3))
+        self.conv2 = nn.Conv2d(16, 32, (3, 3))
+        self.conv3 = nn.Conv2d(32, 64, (3, 3))
+        self.conv4 = nn.Conv2d(64, 128, (3, 3))
+        self.conv5 = nn.Conv2d(128, 256, (3, 3))
 
         # Pooling layer
         self.max_pool = nn.MaxPool2d(2, 2)
@@ -139,10 +144,12 @@ class Model:
             logger.info("GPU Disabled: Using CPU")
 
     def train(self, n_epochs) -> TrainedModel:
-        neural_net = NeuralNet()
-        optimizer = optim.Adam(neural_net.parameters())
-        ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+        neural_net = NeuralNet()
+        if self._use_gpu:
+            neural_net = neural_net.cuda()
+        logger.info(f"Model Architecture: \n{neural_net}")
+        optimizer = optim.Adam(neural_net.parameters())
         validation_losses = []
         min_validation_loss = np.Inf
 
@@ -163,7 +170,6 @@ class Model:
                             validation_losses=validation_losses,
                             optimal_validation_loss=min_validation_loss)
 
-    @timeit
     def _train_epoch(self, epoch: int, neural_net: nn.Module,
                      optimizer: optim.Optimizer):
         train_loss = 0
@@ -171,6 +177,7 @@ class Model:
         neural_net.train()
         for batch_index, (data, target) in enumerate(
                 self._data_provider.train):
+            logger.debug(f"[TRAIN] Processing Batch: {batch_index}")
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
             optimizer.zero_grad()
@@ -185,8 +192,9 @@ class Model:
 
         validation_loss = 0
         neural_net.eval()
-        for batch_index, data, target in enumerate(
+        for batch_index, (data, target) in enumerate(
                 self._data_provider.validation):
+            logger.debug(f"[VALIDATE] Processing Batch: {batch_index}")
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
 
@@ -201,6 +209,8 @@ class Model:
     def test(self) -> TestResult:
         model = NeuralNet()
         model.load_state_dict(torch.load(self._save_path))
+        if self._use_gpu:
+            model = model.cuda()
         test_loss = 0
         correct_labels = 0
         total_labels = 0
@@ -210,13 +220,15 @@ class Model:
                 data, target = data.cuda(), target.cuda()
             output = model(data)
             loss = self._criterion(output, target)
-            test_loss = test_loss + ((loss.data - test_loss) / (batch_idx + 1))
+            test_loss = test_loss + (
+                        (loss.data.item() - test_loss) / (batch_idx + 1))
             pred = output.data.max(1, keepdim=True)[1]
             correct_labels += np.sum(
                 np.squeeze(pred.eq(target.data.view_as(pred))).cpu().numpy())
             total_labels += data.size(0)
 
-        return TestResult(test_loss=test_loss, correct_labels=correct_labels,
+        return TestResult(test_loss=test_loss,
+                          correct_labels=correct_labels,
                           total_labels=total_labels)
 
 
@@ -229,9 +241,11 @@ def train_cli():
 @click.option("--data-path", required=True, type=str)
 @click.option("--save-path", required=True, type=str)
 @click.option("--epochs", required=True, type=int)
+@click.option("--batch-size", default=1)
 @click.option("--gpu/--no-gpu", default=False)
-def train(data_path: str, save_path: str, epochs: int, gpu: bool):
-    data_provider = DataProvider(root_dir=data_path)
+def train(data_path: str, save_path: str, epochs: int, batch_size: int,
+          gpu: bool):
+    data_provider = DataProvider(root_dir=data_path, batch_size=batch_size)
     model = Model(data_provider=data_provider, use_gpu=gpu,
                   save_path=save_path)
     model.train(n_epochs=epochs)
@@ -250,7 +264,8 @@ def test(data_path: str, save_path: str, gpu: bool):
     data_provider = DataProvider(root_dir=data_path)
     model = Model(data_provider=data_provider, use_gpu=gpu,
                   save_path=save_path)
-    model.test()
+    test_results = model.test()
+    logger.info(f"Test Results: {test_results}")
 
 
 main = click.CommandCollection(sources=[train_cli, test_cli])
