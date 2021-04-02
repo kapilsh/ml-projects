@@ -114,6 +114,8 @@ class Model:
                                    False) and torch.cuda.is_available()
         if self._use_gpu:
             logger.info("CUDA is enabled - using GPU")
+        else:
+            logger.info("GPU Disabled: Using CPU")
 
     def train(self, n_epochs) -> TrainedModel:
         neural_net = NeuralNet()
@@ -145,7 +147,7 @@ class Model:
         train_loss = 0
         logger.info(f"[Epoch {epoch}] Starting training phase")
         neural_net.train()
-        for batch_index, data, target in enumerate(
+        for batch_index, (data, target) in enumerate(
                 self._data_provider.train):
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
@@ -181,8 +183,7 @@ class Model:
         correct_labels = 0
         total_labels = 0
         model.eval()
-        for batch_idx, data, target in enumerate(self._data_provider.test):
-            # move to GPU
+        for batch_idx, (data, target) in enumerate(self._data_provider.test):
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
             output = model(data)
