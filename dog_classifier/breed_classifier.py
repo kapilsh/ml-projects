@@ -207,9 +207,9 @@ def train_cli():
 @click.option("--save-path", required=True, type=str)
 @click.option("--epochs", required=True, type=int)
 @click.option("--gpu/--no-gpu", default=False)
-def train(data_path: str, save_path: str, epochs: int, use_gpu: bool):
+def train(data_path: str, save_path: str, epochs: int, gpu: bool):
     data_provider = DataProvider(root_dir=data_path)
-    model = Model(data_provider=data_provider, use_gpu=use_gpu,
+    model = Model(data_provider=data_provider, use_gpu=gpu,
                   save_path=save_path)
     model.train(n_epochs=epochs)
 
@@ -223,9 +223,9 @@ def test_cli():
 @click.option("--data-path", required=True, type=str)
 @click.option("--save-path", required=True, type=str)
 @click.option("--gpu/--no-gpu", default=False)
-def test(data_path: str, save_path: str, use_gpu: bool):
+def test(data_path: str, save_path: str, gpu: bool):
     data_provider = DataProvider(root_dir=data_path)
-    model = Model(data_provider=data_provider, use_gpu=use_gpu,
+    model = Model(data_provider=data_provider, use_gpu=gpu,
                   save_path=save_path)
     model.test()
 
