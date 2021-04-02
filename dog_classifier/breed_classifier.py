@@ -12,6 +12,8 @@ from torchvision import datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
+from dog_classifier.timeit import timeit
+
 
 class DataProvider:
     def __init__(self, root_dir: str, **kwargs):
@@ -51,14 +53,21 @@ class DataProvider:
 
     @property
     def train(self) -> DataLoader:
+        logger.info(f"Loading train images from "
+                    f"{os.path.join(self._root_dir, self._train_subfolder)}")
         return self._train_loader
 
     @property
     def test(self) -> DataLoader:
+        logger.info(f"Loading test images from "
+                    f"{os.path.join(self._root_dir, self._test_subfolder)}")
         return self._test_loader
 
     @property
     def validation(self) -> DataLoader:
+        validation_dir = os.path.join(
+            self._root_dir, self._validation_subfolder)
+        logger.info(f"Loading validation images from {validation_dir}")
         return self._validation_loader
 
 
@@ -142,6 +151,7 @@ class Model:
                             validation_losses=validation_losses,
                             optimal_validation_loss=min_validation_loss)
 
+    @timeit
     def _train_epoch(self, epoch: int, neural_net: nn.Module,
                      optimizer: optim.Optimizer):
         train_loss = 0

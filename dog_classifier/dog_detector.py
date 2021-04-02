@@ -1,5 +1,4 @@
 from glob import glob
-import time
 
 import cv2
 from loguru import logger
@@ -9,21 +8,7 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 
 
-# %%
-
-
-def timeit(method):
-    def timed(*args, **kw):
-        ts = time.time()
-        result = method(*args, **kw)
-        te = time.time()
-        logger.info(f"{method.__qualname__} Took {int((te - ts) * 1000)}ms")
-        return result
-
-    return timed
-
 #%%
-
 
 class DogDetector:
     IMAGENET_MIN_INDEX_DOG = 151
