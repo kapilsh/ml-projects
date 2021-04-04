@@ -1,7 +1,6 @@
 import os
 from collections import namedtuple
 
-import click
 from loguru import logger
 import numpy as np
 import torch
@@ -70,21 +69,14 @@ class DataProvider:
 
     @property
     def train(self) -> DataLoader:
-        logger.info(f"Loading train images from "
-                    f"{os.path.join(self._root_dir, self._train_subfolder)}")
         return self._train_loader
 
     @property
     def test(self) -> DataLoader:
-        logger.info(f"Loading test images from "
-                    f"{os.path.join(self._root_dir, self._test_subfolder)}")
         return self._test_loader
 
     @property
     def validation(self) -> DataLoader:
-        validation_dir = os.path.join(
-            self._root_dir, self._validation_subfolder)
-        logger.info(f"Loading validation images from {validation_dir}")
         return self._validation_loader
 
 
@@ -92,29 +84,31 @@ class NeuralNet(nn.Module):
     def __init__(self):
         super(NeuralNet, self).__init__()
 
-        # Conv Layers
         self.conv1 = nn.Conv2d(3, 16, (3, 3))
+        self.pool1 = nn.MaxPool2d(2, 2)
+
         self.conv2 = nn.Conv2d(16, 32, (3, 3))
+        self.pool2 = nn.MaxPool2d(2, 2)
+
         self.conv3 = nn.Conv2d(32, 64, (3, 3))
+        self.pool3 = nn.MaxPool2d(2, 2)
+
         self.conv4 = nn.Conv2d(64, 128, (3, 3))
+        self.pool4 = nn.MaxPool2d(2, 2)
+
         self.conv5 = nn.Conv2d(128, 256, (3, 3))
+        self.pool5 = nn.MaxPool2d(2, 2)
 
-        # Pooling layer
-        self.max_pool = nn.MaxPool2d(2, 2)
-
-        # Fully Connected Layers
         self.fc1 = nn.Linear(5 * 5 * 256, 400)
+        self.dropout = nn.Dropout(0.3)
         self.fc2 = nn.Linear(400, 133)
 
-        # Dropout
-        self.dropout = nn.Dropout(0.3)
-
     def forward(self, x):
-        x = self.max_pool(functional.relu(self.conv1(x)))
-        x = self.max_pool(functional.relu(self.conv2(x)))
-        x = self.max_pool(functional.relu(self.conv3(x)))
-        x = self.max_pool(functional.relu(self.conv4(x)))
-        x = self.max_pool(functional.relu(self.conv5(x)))
+        x = self.pool1(functional.relu(self.conv1(x)))
+        x = self.pool2(functional.relu(self.conv2(x)))
+        x = self.pool3(functional.relu(self.conv3(x)))
+        x = self.pool4(functional.relu(self.conv4(x)))
+        x = self.pool5(functional.relu(self.conv5(x)))
 
         x = x.view(-1, 5 * 5 * 256)
         x = functional.relu(self.fc1(x))
@@ -124,7 +118,8 @@ class NeuralNet(nn.Module):
 
 
 TrainedModel = namedtuple(
-    "TrainedModel", ["model", "validation_losses", "optimal_validation_loss"])
+    "TrainedModel",
+    ["train_losses", "validation_losses", "optimal_validation_loss"])
 
 TestResult = namedtuple(
     "TestResult", ["test_loss", "correct_labels", "total_labels"])
@@ -151,22 +146,25 @@ class Model:
         logger.info(f"Model Architecture: \n{neural_net}")
         optimizer = optim.Adam(neural_net.parameters())
         validation_losses = []
+        train_losses = []
         min_validation_loss = np.Inf
 
         for epoch in range(n_epochs):
-            validation_loss = self._train_epoch(epoch, neural_net, optimizer)
+            train_loss, validation_loss = self._train_epoch(epoch, neural_net,
+                                                            optimizer)
             validation_losses.append(validation_loss)
+            train_losses.append(train_loss)
             if min_validation_loss > validation_loss:
-                min_validation_loss = validation_loss
                 logger.info(
                     "Validation Loss Decreased: {:.6f} => {:.6f}. "
                     "Saving Model to {}".format(
                         min_validation_loss, validation_loss, self._save_path))
+                min_validation_loss = validation_loss
                 torch.save(neural_net.state_dict(), self._save_path)
 
         optimal_model = NeuralNet()
         optimal_model.load_state_dict(torch.load(self._save_path))
-        return TrainedModel(model=optimal_model,
+        return TrainedModel(train_losses=train_losses,
                             validation_losses=validation_losses,
                             optimal_validation_loss=min_validation_loss)
 
@@ -177,7 +175,6 @@ class Model:
         neural_net.train()
         for batch_index, (data, target) in enumerate(
                 self._data_provider.train):
-            logger.debug(f"[TRAIN] Processing Batch: {batch_index}")
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
             optimizer.zero_grad()
@@ -194,17 +191,15 @@ class Model:
         neural_net.eval()
         for batch_index, (data, target) in enumerate(
                 self._data_provider.validation):
-            logger.debug(f"[VALIDATE] Processing Batch: {batch_index}")
             if self._use_gpu:
                 data, target = data.cuda(), target.cuda()
-
             with torch.no_grad():
                 output = neural_net(data)
             loss = self._criterion(output, target)
             validation_loss = validation_loss + (
                     (loss.item() - validation_loss) / (batch_index + 1))
 
-        return validation_loss
+        return train_loss, validation_loss
 
     def test(self) -> TestResult:
         model = NeuralNet()
@@ -212,8 +207,9 @@ class Model:
         if self._use_gpu:
             model = model.cuda()
         test_loss = 0
-        correct_labels = 0
-        total_labels = 0
+        predicted_labels = np.array([])
+        target_labels = np.array([])
+
         model.eval()
         for batch_idx, (data, target) in enumerate(self._data_provider.test):
             if self._use_gpu:
@@ -221,54 +217,12 @@ class Model:
             output = model(data)
             loss = self._criterion(output, target)
             test_loss = test_loss + (
-                        (loss.data.item() - test_loss) / (batch_idx + 1))
-            pred = output.data.max(1, keepdim=True)[1]
-            correct_labels += np.sum(
-                np.squeeze(pred.eq(target.data.view_as(pred))).cpu().numpy())
-            total_labels += data.size(0)
+                    (loss.data.item() - test_loss) / (batch_idx + 1))
+            predicted = output.max(1).indices
+            predicted_labels = np.append(predicted_labels, predicted.numpy())
+            target_labels = np.append(target_labels, target.numpy())
 
         return TestResult(test_loss=test_loss,
-                          correct_labels=correct_labels,
-                          total_labels=total_labels)
-
-
-@click.group()
-def train_cli():
-    pass
-
-
-@train_cli.command()
-@click.option("--data-path", required=True, type=str)
-@click.option("--save-path", required=True, type=str)
-@click.option("--epochs", required=True, type=int)
-@click.option("--batch-size", default=1)
-@click.option("--gpu/--no-gpu", default=False)
-def train(data_path: str, save_path: str, epochs: int, batch_size: int,
-          gpu: bool):
-    data_provider = DataProvider(root_dir=data_path, batch_size=batch_size)
-    model = Model(data_provider=data_provider, use_gpu=gpu,
-                  save_path=save_path)
-    model.train(n_epochs=epochs)
-
-
-@click.group()
-def test_cli():
-    pass
-
-
-@test_cli.command()
-@click.option("--data-path", required=True, type=str)
-@click.option("--save-path", required=True, type=str)
-@click.option("--gpu/--no-gpu", default=False)
-def test(data_path: str, save_path: str, gpu: bool):
-    data_provider = DataProvider(root_dir=data_path)
-    model = Model(data_provider=data_provider, use_gpu=gpu,
-                  save_path=save_path)
-    test_results = model.test()
-    logger.info(f"Test Results: {test_results}")
-
-
-main = click.CommandCollection(sources=[train_cli, test_cli])
-
-if __name__ == '__main__':
-    main()
+                          correct_labels=sum(np.equal(target_labels,
+                                                      predicted_labels)),
+                          total_labels=len(target_labels))
