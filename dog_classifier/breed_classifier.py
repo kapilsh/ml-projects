@@ -104,11 +104,16 @@ class NeuralNet(nn.Module):
         self.fc2 = nn.Linear(400, 133)
 
     def forward(self, x):
-        x = self.pool1(functional.relu(self.conv1(x)))
-        x = self.pool2(functional.relu(self.conv2(x)))
-        x = self.pool3(functional.relu(self.conv3(x)))
-        x = self.pool4(functional.relu(self.conv4(x)))
-        x = self.pool5(functional.relu(self.conv5(x)))
+        x = self.conv1(x)
+        x = self.pool1(functional.relu(x))
+        x = self.conv2(x)
+        x = self.pool2(functional.relu(x))
+        x = self.conv3(x)
+        x = self.pool3(functional.relu(x))
+        x = self.conv4(x)
+        x = self.pool4(functional.relu(x))
+        x = self.conv5(x)
+        x = self.pool5(functional.relu(x))
 
         x = x.view(-1, 5 * 5 * 256)
         x = functional.relu(self.fc1(x))
