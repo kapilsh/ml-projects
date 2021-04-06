@@ -134,7 +134,8 @@ TrainedModel = namedtuple(
     ["train_losses", "validation_losses", "optimal_validation_loss"])
 
 TestResult = namedtuple(
-    "TestResult", ["test_loss", "correct_labels", "total_labels"])
+    "TestResult", ["test_loss", "correct_labels", "total_labels",
+                   "predicted_labels", "target_labels"])
 
 
 class BaseModel(metaclass=abc.ABCMeta):
@@ -249,7 +250,9 @@ class BaseModel(metaclass=abc.ABCMeta):
         return TestResult(test_loss=test_loss,
                           correct_labels=sum(np.equal(target_labels,
                                                       predicted_labels)),
-                          total_labels=len(target_labels))
+                          total_labels=len(target_labels),
+                          predicted_labels=predicted_labels,
+                          target_labels=target_labels)
 
 
 class ModelScratch(BaseModel):
@@ -276,7 +279,7 @@ class ModelTransferLearn(BaseModel):
         super().__init__(*args, **kwargs)
         self._transfer_model = self._get_model_arch()
 
-    def _get_model_arch(self):
+    def _get_model_arch(self) -> nn.Module:
         vgg16 = models.vgg16(pretrained=True)
         for param in vgg16.features.parameters():
             param.requires_grad = False  # pre-trained - dont touch
