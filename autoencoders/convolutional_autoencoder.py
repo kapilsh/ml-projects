@@ -7,6 +7,7 @@ import torch.nn.functional as functional
 from loguru import logger
 from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
+from tqdm import tqdm
 
 
 class DataProvider:
@@ -60,7 +61,7 @@ class Decoder(nn.Module):
         x = self.t_conv1(x)
         x = functional.relu(x)
         x = self.t_conv2(x)
-        x = functional.sigmoid(x)
+        x = torch.sigmoid(x)
         return x
 
 
@@ -94,7 +95,8 @@ class Model:
         for epoch in range(1, n_epochs + 1):
             logger.info(f"[EPOCH {epoch}: Starting training")
             train_loss = 0.0
-            for data, _ in self._data_provider.train:
+            batches = len(self._data_provider.train)
+            for data, _ in tqdm(self._data_provider.train, total=batches):
                 optimizer.zero_grad()
                 if self._use_gpu:
                     data = data.cuda()
