@@ -85,6 +85,10 @@ class Model:
         self._data_provider = data_provider
         self._criterion = nn.MSELoss()
         self._use_gpu = use_gpu and torch.cuda.is_available()
+        if self._use_gpu:
+            logger.info("CUDA enabled. Using GPU")
+        else:
+            logger.warning("CUDA not available/enabled. Using CPU")
 
     def train(self, n_epochs: int) -> TrainedModel:
         model = AutoEncoder()
