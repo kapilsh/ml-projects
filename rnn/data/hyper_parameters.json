@@ -1,0 +1,13 @@
+{
+  "num_layers": 2,
+  "hidden_size": 512,
+  "epochs": 20,
+  "batch_size": 128,
+  "window": 100,
+  "learning_rate": 0.001,
+  "clip": 5,
+  "validation_split": 0.1,
+  "drop_prob": 0.5,
+  "validation_counts": 10,
+  "use_gpu": true
+}
