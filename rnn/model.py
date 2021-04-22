@@ -217,7 +217,7 @@ def predict(model: LSTMModel, char: str, use_gpu: bool,
 
     h, c = h.detach(), c.detach()
 
-    output, hn, cn = model(inputs, h, c)
+    output, h, c = model(inputs, h, c)
     p = functional.softmax(output, dim=1).data
 
     if use_gpu:

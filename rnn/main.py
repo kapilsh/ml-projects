@@ -1,3 +1,5 @@
+import os
+
 import click
 import torch
 
@@ -39,7 +41,17 @@ def test_cli():
 @click.option("--gpu/--no-gpu", default=False)
 def test(model_path: str, seed: str, sample_length: int, top_k: int,
          gpu: bool):
-    with open(model_path, "rb") as f:
+    base_dir = os.path.dirname(model_path)
+    file_name = os.path.basename(model_path)
+    file_path, file_ext = os.path.splitext(file_name)
+    all_check_points = [os.path.join(base_dir, x) for x in
+                        os.listdir(base_dir) if x.startswith(file_path)
+                        and "final" not in x and x.endswith(file_ext)]
+    all_check_points.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+
+    final_path = os.path.join(base_dir, f"{file_path}_final{file_ext}")
+
+    with open(final_path, "rb") as f:
         checkpoint = torch.load(f)
 
     lstm_model = LSTMModel(checkpoint['tokens'],
@@ -51,6 +63,31 @@ def test(model_path: str, seed: str, sample_length: int, top_k: int,
     sample = generate_sample(lstm_model, sample_length, seed, top_k,
                              use_gpu=gpu)
     print(sample)
+
+    print("------------------------------------------------------")
+
+    print("Checkpoint Results")
+
+    for f in all_check_points:
+        print(f)
+
+        print("------------------------------------------------------")
+
+        with open(final_path, "rb") as f:
+            checkpoint = torch.load(f)
+
+        lstm_model = LSTMModel(checkpoint['tokens'],
+                               hidden_size=checkpoint['parameters'][
+                                   "hidden_size"],
+                               num_layers=checkpoint['parameters'][
+                                   "num_layers"],
+                               drop_prob=checkpoint['parameters'][
+                                   "drop_prob"])
+        lstm_model.load_state_dict(checkpoint["model"])
+
+        sample = generate_sample(lstm_model, sample_length, seed, top_k,
+                                 use_gpu=gpu)
+        print(sample)
 
 
 main = click.CommandCollection(sources=[train_cli, test_cli])

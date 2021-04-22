@@ -1,8 +1,8 @@
 {
   "num_layers": 2,
   "hidden_size": 512,
-  "epochs": 20,
-  "batch_size": 128,
+  "epochs": 30,
+  "batch_size": 16,
   "window": 100,
   "learning_rate": 0.001,
   "clip": 5,
