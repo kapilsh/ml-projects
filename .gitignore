@@ -3,3 +3,7 @@ kernel_regression/.ipynb_checkpoints/*
 .idea
 dog_classifier/__pycache__/
 autoencoders/__pycache__/
+
+autoencoders/.ipynb_checkpoints/
+rnn/__pycache__/
+rnn/runs/

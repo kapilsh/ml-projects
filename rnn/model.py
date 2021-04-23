@@ -1,12 +1,14 @@
 import json
 import os
 from dataclasses import dataclass
+from typing import Tuple
 
 import pandas as pd
 import torch
 from loguru import logger
 from torch import nn
 import torch.nn.functional as functional
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from rnn.loader import DataLoader, Tokens
@@ -78,6 +80,7 @@ class ModelRunner:
     def __init__(self, data_loader: DataLoader, save_path: str):
         self._data_loader = data_loader
         self._save_path = save_path
+        self._tb_writer = SummaryWriter()
 
     def train(self, parameters: ModelHyperParameters):
         use_gpu = parameters.use_gpu and torch.cuda.is_available()
@@ -86,16 +89,26 @@ class ModelRunner:
         else:
             logger.info("GPU Disabled: Using CPU")
 
+        # load the tokens from the text
         tokens = self._data_loader.tokens
+
+        # define the model
         model = LSTMModel(tokens=tokens,
                           drop_prob=parameters.drop_prob,
                           num_layers=parameters.num_layers,
                           hidden_size=parameters.hidden_size)
+
+        # enable training mode
         model.train()
+
+        # use Adam optimizer
         optimizer = torch.optim.Adam(model.parameters(),
                                      lr=parameters.learning_rate)
+
+        # loss function
         criterion = nn.CrossEntropyLoss()
 
+        # split data into training and validation sets
         train_data, valid_data = self._split_train_validation(
             tokens.tokens, parameters.validation_split)
 
@@ -110,6 +123,8 @@ class ModelRunner:
             runs = 0
             # initial hidden and cell state
             h, c = model.initial_hidden_state(parameters.batch_size)
+
+            # train batch by batch
             for x, y in DataLoader.generate_batches(train_data,
                                                     parameters.batch_size,
                                                     parameters.window):
@@ -124,24 +139,35 @@ class ModelRunner:
                     inputs, targets = inputs.cuda(), targets.cuda()
                     h, c = h.cuda(), c.cuda()
 
-                # detach - If we don't, we'll back-prop all the way to the start
+                # detach for BPTT :
+                # If we don't, we'll back-prop all the way to the start
                 h, c = h.detach(), c.detach()
 
+                # zero out previous gradients
                 model.zero_grad()
+
+                # model output
                 output, h, c = model(inputs, h, c)
 
                 loss = criterion(output, targets)
+
+                # back-propagation
                 loss.backward()
 
                 # gradient clipping
                 nn.utils.clip_grad_norm_(model.parameters(), parameters.clip)
                 optimizer.step()
 
+                # model validation
                 if runs % parameters.validation_counts == 0:
                     # run validation
                     hv, cv = model.initial_hidden_state(parameters.batch_size)
+
                     validation_losses = []
+
+                    # enable evaluation mode
                     model.eval()
+
                     for val_x, val_y in DataLoader.generate_batches(
                             valid_data, parameters.batch_size,
                             parameters.window):
@@ -175,8 +201,13 @@ class ModelRunner:
                         "ValidationLoss": val_loss_final
                     })
 
+                    self._tb_writer.add_scalar("Loss/train", train_loss,
+                                               epoch * 10000 + runs)
+                    self._tb_writer.add_scalar("Loss/valid", val_loss_final,
+                                               epoch * 10000 + runs)
                 model.train()
 
+            self._tb_writer.flush()
             self._save_check_point(model, parameters, tokens, epoch)
 
         self._save_check_point(model, parameters, tokens)
@@ -218,33 +249,39 @@ def predict(model: LSTMModel, char: str, use_gpu: bool,
     h, c = h.detach(), c.detach()
 
     output, h, c = model(inputs, h, c)
+
+    # Calculate softmax activation for each character
     p = functional.softmax(output, dim=1).data
 
     if use_gpu:
         p = p.cpu()
 
+    # choose top k activate characters
     p, top_ch = p.topk(top_k)
     top_ch = top_ch.numpy().squeeze()
 
     p = p.numpy().squeeze()
+    # choose a random character based on their respective probabilities
     char_token = np.random.choice(top_ch, p=p / p.sum())
 
     return model.tokens.int_to_chars[char_token], h, c
 
 
 def generate_sample(model: LSTMModel, size: int, seed: str, top_k: int = 1,
-                    use_gpu: bool = False):
+                    use_gpu: bool = False) -> str:
     model.eval()  # eval mode
 
     text_chars = list(seed)
     h, c = model.initial_hidden_state(1)
 
+    # go through the seed text to generate the next predicted character
     for i, char in enumerate(seed):
         next_char, h, c = predict(model=model, char=char,
                                   use_gpu=use_gpu, h=h, c=c, top_k=top_k)
         if i == len(seed) - 1:
             text_chars.append(next_char)
 
+    # generate new text
     for i in range(size):
         next_char, h, c = predict(model=model, char=text_chars[-1],
                                   use_gpu=use_gpu, h=h, c=c, top_k=top_k)
