@@ -1,0 +1,11 @@
+{
+  "remove_frequency": 5,
+  "batch_size": 256,
+  "context_window": 5,
+  "noise_count": 5,
+  "device": "cuda",
+  "epochs": 5,
+  "embed_size": 300,
+  "lr": 0.003,
+  "snapshot_frequency": 100
+}
