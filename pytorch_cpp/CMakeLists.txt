@@ -3,7 +3,7 @@ project(pytorch_cpp)
 
 set(CMAKE_CXX_STANDARD 17)
 
-list(APPEND CMAKE_PREFIX_PATH "/Users/kapilsharma/oss/pytorch/torch")
+list(APPEND CMAKE_PREFIX_PATH $ENV{LOCAL_TORCH_LIB_PATH})
 
 message(${CMAKE_PREFIX_PATH})
 
