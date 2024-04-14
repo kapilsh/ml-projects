@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import click
 
 NUM_DENSE = 13
@@ -34,8 +35,7 @@ def save_smaller_data_to_parquet(file_path: str) -> None:
 
     for chunk in pd.read_csv(file_path, sep='\t', header=None, names=columns,
                              compression='gzip', chunksize=chunk_size):
-        if num_chunks % 100 == 0:
-            print(f"Done with {original_chunks - num_chunks}")
+        print(f"Done with {original_chunks - num_chunks}")
         chunk = clean_chunk(chunk)
         all_dfs.append(chunk)
         num_chunks -= 1
@@ -47,7 +47,7 @@ def save_smaller_data_to_parquet(file_path: str) -> None:
     print("Total data size", result_df.memory_usage(deep=True).sum() / 10 ** 9,
           "gb")
 
-    save_file_path = file_path + "_converted.parquet"
+    save_file_path = file_path.replace(".", "_") + "_converted.parquet"
     result_df.to_parquet(save_file_path)
 
 
