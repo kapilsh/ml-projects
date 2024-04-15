@@ -1,8 +1,9 @@
 import torch
 import pandas as pd
+import click
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-
+from loguru import logger
 
 class CriteoParquetDataset(Dataset):
     def __init__(self, file_name: str):
@@ -19,11 +20,21 @@ class CriteoParquetDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.label_tensor[idx], self.dense_tensor[idx], self.sparse_tensor[idx]
+@click.command()
+@click.option('--file_path', type=click.Path(exists=True), help='Path to the parquet file')
+def process_file(file_path):
+    """
+    Process the file specified by --file_path.
+    """
+    logger.info("Reading the parquet file {}...".format(file_path))
 
-
-if __name__ == "__main__":
-    dataset = CriteoParquetDataset("/Volumes/nas-drive/day_0_gz_converted.parquet")
+    dataset = CriteoParquetDataset(file_path)
     data_loader = DataLoader(dataset, batch_size=32, shuffle=False)
     for labels, dense, sparse in data_loader:
-        print(labels, dense, sparse)
+        logger.info("Labels: {}".format(labels))
+        logger.info("Dense: {}".format(dense))
+        logger.info("Sparse: {}".format(sparse))
         break
+
+if __name__ == "__main__":
+    process_file()

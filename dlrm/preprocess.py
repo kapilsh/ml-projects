@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import click
+import torch
+from loguru import logger
 
 NUM_DENSE = 13
 NUM_SPARSE = 26
@@ -27,7 +29,7 @@ def clean_chunk(chunk):
     return chunk
 
 
-def save_smaller_data_to_parquet(file_path: str) -> None:
+def process_file(file_path: str) -> None:
     chunk_size = 1000000
     all_dfs = []
     num_chunks = 10
@@ -58,8 +60,9 @@ def main(file_path: str):
     """
     Process the file specified by FILE_PATH.
     """
-    click.echo(f"Processing file: {file_path}")
-    save_smaller_data_to_parquet(file_path=file_path)
+    logger.info(f"Processing file: {file_path}")
+    process_file(file_path=file_path)
+    logger.info("Done processing the file.")
 
 
 if __name__ == "__main__":
