@@ -5,6 +5,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from loguru import logger
 
+
 class CriteoParquetDataset(Dataset):
     def __init__(self, file_name: str):
         df = pd.read_parquet(file_name)
@@ -19,9 +20,13 @@ class CriteoParquetDataset(Dataset):
         return self.total_rows
 
     def __getitem__(self, idx):
-        return self.label_tensor[idx], self.dense_tensor[idx], self.sparse_tensor[idx]
+        return self.label_tensor[idx], self.dense_tensor[idx], \
+        self.sparse_tensor[idx]
+
+
 @click.command()
-@click.option('--file_path', type=click.Path(exists=True), help='Path to the parquet file')
+@click.option('--file_path', type=click.Path(exists=True),
+              help='Path to the parquet file')
 def process_file(file_path):
     """
     Process the file specified by --file_path.
@@ -35,6 +40,7 @@ def process_file(file_path):
         logger.info("Dense: {}".format(dense))
         logger.info("Sparse: {}".format(sparse))
         break
+
 
 if __name__ == "__main__":
     process_file()

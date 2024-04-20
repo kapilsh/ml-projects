@@ -13,6 +13,24 @@ from torch.utils.data import DataLoader
 from dlrm.criteo_dataset import CriteoParquetDataset
 
 
+# MDOEL ARCHITECTURE
+# output:
+#                     probability of a click
+# model:                        |
+#                              /\
+#                             /__\
+#                               |
+#       _____________________> Op  <___________________
+#     /                         |                      \
+#    /\                        /\                      /\
+#   /__\                      /__\           ...      /__\
+#    |                          |                       |
+#    |                         Op                      Op
+#    |                    ____/__\_____           ____/__\____
+#    |                   |_Emb_|____|__|    ...  |_Emb_|__|___|
+# input:
+# [ dense features ]     [sparse indices] , ..., [sparse indices]
+
 class MLP(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size: int):
         super(MLP, self).__init__()
@@ -29,7 +47,7 @@ class MLP(nn.Module):
 
 class DenseArch(nn.Module):
     def __init__(self, dense_feature_count: int, output_size: int) -> None:
-        super(DenseArch, self).__init__()  # Call the superclass's __init__ method
+        super(DenseArch, self).__init__()
         self.mlp = MLP(input_size=dense_feature_count, hidden_size=output_size * 2, output_size=output_size)  # D X O
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -55,6 +73,7 @@ class SparseArch(nn.Module):
         })
 
     def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
+        # TODO: FIX here
         output_values = []
         for feature, input_values in inputs.items():
             embeddings = self.embeddings[feature](input_values)
