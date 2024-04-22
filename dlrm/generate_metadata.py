@@ -5,10 +5,9 @@ import json
 from loguru import logger
 
 
-def calculate_metadata(column):
+def calculate_cardinality_and_tokenizer_values(column):
     cardinality = column.nunique()
-    tokenizer_values = dict(
-        zip(column.unique().tolist(), list(range(cardinality))))
+    tokenizer_values = sorted(column.unique().tolist())
     return cardinality, tokenizer_values
 
 
@@ -30,7 +29,7 @@ def process_file(file_path, output_path):
     for column_name in df.columns:
         if column_name.startswith("SPARSE"):
             logger.info("Processing column: {}".format(column_name))
-            cardinality, tokenizer_values = calculate_metadata(df[column_name])
+            cardinality, tokenizer_values = calculate_cardinality_and_tokenizer_values(df[column_name])
             results[column_name] = {
                 'cardinality': cardinality,
                 'tokenizer_values': tokenizer_values

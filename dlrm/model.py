@@ -1,16 +1,16 @@
+import time
 from dataclasses import dataclass
-
 
 import json
 import click
 import torch
 from loguru import logger
 from torch import nn
-from typing import Mapping, Tuple, List, Dict
+from typing import Mapping, Tuple, List, Dict, Union
 
 from torch.utils.data import DataLoader
 
-from dlrm.criteo_dataset import CriteoParquetDataset
+from criteo_dataset import CriteoParquetDataset
 
 
 # MDOEL ARCHITECTURE
@@ -56,30 +56,44 @@ class DenseArch(nn.Module):
 
 
 class SparseArch(nn.Module):
-    def __init__(self, embedding_dimensions: Mapping[str, Tuple[int, int]], output_size: int) -> None:
+    def __init__(self, metadata: Dict[str, Union[int, List[int]]],
+                 embedding_sizes: Mapping[str, int],
+                 output_size: int) -> None:
         super(SparseArch, self).__init__()
 
+        self.num_sparse_features = len(metadata)
         # Create Embedding layers for each sparse feature
         self.embeddings = nn.ModuleDict({
-            feature_name: nn.Embedding(num_embeddings, embedding_dim)
-            for feature_name, (num_embeddings, embedding_dim) in embedding_dimensions.items()
+            feature_name: nn.Embedding(m["cardinality"], embedding_sizes[feature_name]) for feature_name, m in
+            metadata.items()
         })
-        self.num_sparse_features = len(embedding_dimensions)
 
-        # Create MLP for each sparse feature
         self.mlps = nn.ModuleDict({
             feature_name: MLP(input_size=embedding_dim, hidden_size=output_size * 2, output_size=output_size)
-            for feature_name, (num_embeddings, embedding_dim) in embedding_dimensions.items()
+            for feature_name, embedding_dim in embedding_sizes.items()
         })
+
+        # Create mapping for each sparse feature
+        self.mapping = [metadata[f"SPARSE_{i}"]["tokenizer_values"] for i in range(self.num_sparse_features)]
+
+    @staticmethod
+    def get_indices(tensor: torch.Tensor, tokenizer_values: List[int]):
+        tensor = tensor.reshape(-1, 1)
+        tokenizers = torch.tensor(tokenizer_values).reshape(1, -1)
+        if tensor.is_cuda:
+            tokenizers = tokenizers.cuda()
+        matches = tensor == tokenizers
+        indices = torch.argmax(matches.to(torch.int64), dim=1)
+        return indices
 
     def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
         # TODO: FIX here
         output_values = []
-        for feature, input_values in inputs.items():
-            embeddings = self.embeddings[feature](input_values)
-            sparse_out = self.mlps[feature](embeddings)
+        for i in range(self.num_sparse_features):
+            indices = self.get_indices(inputs[:, i], self.mapping[i])
+            embeddings = self.embeddings[f"SPARSE_{i}"](indices)
+            sparse_out = self.mlps[f"SPARSE_{i}"](embeddings)
             output_values.append(sparse_out)
-
         return output_values
 
 
@@ -107,7 +121,7 @@ class PredictionLayer(nn.Module):
 @dataclass
 class Parameters:
     dense_input_feature_size: int
-    sparse_embedding_dimenstions: Mapping[str, Tuple[int, int]]
+    sparse_embedding_sizes: Mapping[str, int]
     dense_output_size: int
     sparse_output_size: int
     dense_hidden_size: int
@@ -116,16 +130,17 @@ class Parameters:
 
 
 class DLRM(nn.Module):
-    def __init__(self, parameters: Parameters):
+    def __init__(self, metadata: Dict[str, Union[int, List[int]]], parameters: Parameters):
         super(DLRM, self).__init__()
         self.dense_layer = DenseArch(dense_feature_count=parameters.dense_input_feature_size,
                                      output_size=parameters.dense_output_size)
-        self.sparse_layer = SparseArch(embedding_dimensions=parameters.sparse_embedding_dimenstions,
+        self.sparse_layer = SparseArch(metadata=metadata,
+                                       embedding_sizes=parameters.sparse_embedding_sizes,
                                        output_size=parameters.sparse_output_size)
         self.interaction_layer = DenseSparseInteractionLayer()
         self.prediction_layer = PredictionLayer(
             dense_out_size=parameters.dense_output_size,
-            sparse_out_sizes=[parameters.sparse_output_size] * len(parameters.sparse_embedding_dimenstions),
+            sparse_out_sizes=[parameters.sparse_output_size] * len(parameters.sparse_embedding_sizes),
             hidden_size=parameters.prediction_hidden_size
         )
 
@@ -133,9 +148,7 @@ class DLRM(nn.Module):
         dense_out = self.dense_layer(dense_features)
         sparse_out = self.sparse_layer(sparse_features)
         ds_out = self.interaction_layer(dense_out, sparse_out)
-        return self.prediction_layer(ds_out)
-
-
+        return self.prediction_layer(ds_out).squeeze()
 
 
 def read_metadata(metadata_path):
@@ -161,42 +174,60 @@ def dry_run_with_data(file_path, metadata_path):
     logger.info("Dense size: {}".format(dense.size()))
     logger.info("Sparse size: {}".format(sparse.size()))
 
-    metadata = read_metadata(metadata_path)
-
     dense_mlp_out_size = 16
     num_dense_features = dense.size()[1]
     dense_arch = DenseArch(num_dense_features, dense_mlp_out_size)
     dense_out = dense_arch(dense)
     logger.info("Dense out size: {}".format(dense_out.size()))
 
-    # TODO fix the sparse loader to use the metadata
-    # TODO dry run the sparse arch
-    # TODO dry run the interaction layer
-    # TODO dry run the prediction layer
+    metadata = read_metadata(metadata_path)
+    embedding_size = 16
+    embedding_sizes = {fn: embedding_size for fn in metadata.keys()}
+    sparse_mlp_out_size = 16
+    sparse_arch = SparseArch(metadata, embedding_sizes, output_size=sparse_mlp_out_size)
+    sparse_out = sparse_arch(sparse)
+    for v in sparse_out:
+        logger.info("Sparse out size: {}".format(v.size()))
+
+    dense_sparse_interaction_layer = DenseSparseInteractionLayer()
+    ds_out = dense_sparse_interaction_layer(dense_out, sparse_out)
+    logger.info("Dense sparse interaction out size: {}".format(ds_out.size()))
+
+    prediction_layer = PredictionLayer(dense_out_size=dense_mlp_out_size,
+                                       sparse_out_sizes=[sparse_mlp_out_size] * len(metadata),
+                                       hidden_size=16)
+    pred_out = prediction_layer(ds_out)
+    logger.info("Prediction out size: {}".format(pred_out.size()))
+    logger.info("Prediction out value: {}".format(pred_out))
+
     # TODO dry run the DLRM model
+    parameters = Parameters(
+        dense_input_feature_size=13,
+        sparse_embedding_sizes={
+            "SPARSE_{}".format(i): 16 for i in range(26)
+        },
+        dense_output_size=16,
+        sparse_output_size=16,
+        dense_hidden_size=16,
+        sparse_hidden_size=16,
+        prediction_hidden_size=16
+    )
+    dlrm = DLRM(metadata, parameters).cuda()
+    start = time.time()
+    prediction = dlrm(dense.cuda(), sparse.cuda())
+    logger.info("DLRM prediction size: {}".format(prediction.size()))
+    logger.info("DLRM prediction value: {}".format(prediction))
+    logger.info("[EAGER] Time taken for prediction: {}".format(time.time() - start))
+
+    # torch._dynamo.config.verbose = True
+    # dlrm_compiled = torch.compile(dlrm, mode="max-autotune")
+    # logger.info("Compiled DLRM model: {}".format(dlrm_compiled))
+    # start = time.time()
+    # prediction = dlrm_compiled(dense.cuda(), sparse.cuda())
+    # logger.info("DLRM prediction size: {}".format(prediction.size()))
+    # logger.info("DLRM prediction value: {}".format(prediction))
+    # logger.info("[COMPILED] Time taken for prediction: {}".format(time.time() - start))
 
 
 if __name__ == "__main__":
     dry_run_with_data()
-    # parameters = Parameters(
-    #     dense_input_feature_size=13,
-    #     sparse_embedding_dimenstions={
-    #         "SPARSE_{}".format(i): (100, 10) for i in range(26)
-    #     },
-    #     dense_output_size=4,
-    #     sparse_output_size=4,
-    #     dense_hidden_size=4,
-    #     sparse_hidden_size=4,
-    #     prediction_hidden_size=4
-    # )
-    #
-    # model = DLRM(parameters)
-    # dense_features = torch.rand(32, 13)
-    # sparse_features = {f"SPARSE_{i}": torch.randint(0, 100, (32,)) for i in range(26)}
-    # model(dense_features, sparse_features)
-    # print(model)
-    # print("Model created successfully")
-    # print("Model output")
-    # print(model(dense_features, sparse_features))
-    # print("Model output shape")
-    # print(model(dense_features, sparse_features).shape)
