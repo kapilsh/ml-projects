@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import click
-import torch
 from loguru import logger
 
 NUM_DENSE = 13

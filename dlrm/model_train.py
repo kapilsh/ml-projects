@@ -1,4 +1,6 @@
 import time
+import uuid
+from functools import partial
 
 import torch
 from torch import nn
@@ -10,6 +12,16 @@ from tqdm import tqdm
 
 from criteo_dataset import CriteoParquetDataset
 from model import DLRM, read_metadata, Parameters as ModelParameters
+from torch.profiler import profile, record_function, ProfilerActivity
+from torch.utils.tensorboard import SummaryWriter
+
+
+logger.add("train_logs/dlrm_model_train_{time}.log")
+
+def trace_handler(prof: profile, results_dir: str):
+    logger.info("\n" + prof.key_averages().table(
+        sort_by="self_cuda_time_total", row_limit=-1))
+    prof.export_chrome_trace(f"/{results_dir}/test_trace_" + str(uuid.uuid4()) + ".json")
 
 
 def main():
@@ -34,10 +46,13 @@ def main():
         sparse_output_size=hyperparameters['sparse_output_size'],
         dense_hidden_size=hyperparameters['dense_hidden_size'],
         sparse_hidden_size=hyperparameters['sparse_hidden_size'],
-        prediction_hidden_size=hyperparameters['prediction_hidden_size']
+        prediction_hidden_size=hyperparameters['prediction_hidden_size'],
+        modulus_hash_size=hyperparameters['modulus_hash_size'],
     )
 
-    model = DLRM(metadata=metadata, parameters=model_parameters).to(hyperparameters['device'])
+    dlrm = DLRM(metadata=metadata, parameters=model_parameters).to(hyperparameters['device'])
+    # model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
+    model = dlrm
     optimizer = torch.optim.Adam(model.parameters(), lr=hyperparameters['learning_rate'])
 
     # Binary Cross Entropy loss
@@ -45,21 +60,53 @@ def main():
 
     # DataLoader for your dataset
     train_loader = iter(DataLoader(train_dataset, batch_size=hyperparameters['batch_size']['train'], shuffle=True))
-    valid_loader = iter(DataLoader(valid_dataset, batch_size=hyperparameters['batch_size']['validation'], shuffle=False))
+    valid_loader = iter(
+        DataLoader(valid_dataset, batch_size=hyperparameters['batch_size']['validation'], shuffle=False))
 
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
+    torch.cuda.empty_cache()
 
     # Initialize the best validation loss to a high value
     best_valid_loss = float('inf')
 
+    start_time_all = time.time()
+
+    writer = SummaryWriter(log_dir="tb_logs", flush_secs=30)
+    prof = torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+
+        # In this example with wait=1, warmup=1, active=2, repeat=1,
+        # profiler will skip the first step/iteration,
+        # start warming up on the second, record
+        # the third and the forth iterations,
+        # after which the trace will become available
+        # and on_trace_ready (when set) is called;
+        # the cycle repeats starting with the next step
+
+        schedule=torch.profiler.schedule(
+            wait=1,
+            warmup=1,
+            active=3,
+            repeat=1),
+        # on_trace_ready=partial(trace_handler,
+        #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('tb_logs')
+        # used when outputting for tensorboard
+    )
+    prof.start()
+
     # Training Loop
     for epoch in range(num_epochs):
         logger.info("Epoch: {}".format(epoch + 1))
-
         start = time.time()
         # Training Phase
         train_loss = 0
+        correct_predictions = 0
+        total_predictions = 0
         model.train()
         for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']), ncols=80):
             labels, dense, sparse = next(train_loader)
@@ -84,6 +131,15 @@ def main():
             # logger.info("--- Backward pass and optimization done")
             train_loss = train_loss + (
                     (loss.item() - train_loss) / (batch_idx + 1))
+            # Convert outputs probabilities to predicted class (0 or 1)
+            predicted = torch.sigmoid(outputs).data > 0.5
+            # Update total and correct predictions
+            total_predictions += labels.size(0)
+            correct_predictions += (predicted == labels).sum().item()
+            writer.add_scalar("Loss/train", train_loss, epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+            writer.add_scalar("Accuracy/train", correct_predictions / total_predictions,
+                              epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+            prof.step()
 
         logger.info("Train Time taken: {:.2f}s".format(time.time() - start))
 
@@ -91,6 +147,8 @@ def main():
         # Validation Phase
         model.eval()
         with torch.no_grad():
+            total_predictions = 0
+            correct_predictions = 0
             valid_loss = 0.0
             for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']), ncols=80):
                 labels, dense, sparse = next(valid_loader)
@@ -105,6 +163,20 @@ def main():
                 valid_loss = valid_loss + (
                         (loss.item() - valid_loss) / (batch_idx + 1))
 
+                # Convert outputs probabilities to predicted class (0 or 1)
+                predicted = torch.sigmoid(outputs).data > 0.5
+                # Update total and correct predictions
+                total_predictions += labels.size(0)
+                correct_predictions += (predicted == labels).sum().item()
+                valid_accuracy = correct_predictions / total_predictions
+                writer.add_scalar("Loss/valid",
+                                  valid_loss,
+                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                writer.add_scalar("Accuracy/valid",
+                                  valid_accuracy,
+                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                prof.step()
+
         logger.info("Validation Time taken: {:.2f}s".format(time.time() - start))
         logger.info("----------------------------------------------")
         logger.info(f'Epoch [{epoch + 1}/{num_epochs}], '
@@ -118,6 +190,10 @@ def main():
             best_valid_loss = valid_loss
             torch.save(model.state_dict(), hyperparameters['model_path'])
             logger.info(f'Validation loss decreased. Saving model...')
+    prof.stop()
+    writer.flush()
+
+    logger.info("Total Time taken: {:.2f}s".format(time.time() - start_time_all))
 
 
 if __name__ == '__main__':

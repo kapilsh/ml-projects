@@ -9,3 +9,15 @@ rnn/__pycache__/
 rnn/runs/
 dlrm/__pycache__/
 investments/.ipynb_checkpoints/
+dlrm/.ipynb_checkpoints/
+dlrm/runs/
+dlrm/train_logs/
+dlrm/torch_compile_debug/
+dlrm/tb_logs/
+pytorch_cpp/.ipynb_checkpoints
+pytorch_cpp/build/
+pytorch_cpp/cmake-build-debug/
+dlrm/profiler_logs/
+embeddings/.ipynb_checkpoints/
+embeddings/__pycache__/
+

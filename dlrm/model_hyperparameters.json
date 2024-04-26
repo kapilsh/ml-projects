@@ -34,17 +34,18 @@
     "SPARSE_24": 16,
     "SPARSE_25": 16
   },
-  "dense_output_size": 16,
-  "sparse_output_size": 16,
-  "dense_hidden_size": 16,
-  "sparse_hidden_size": 16,
-  "prediction_hidden_size": 16,
+  "dense_output_size": 128,
+  "sparse_output_size": 64,
+  "dense_hidden_size": 32,
+  "sparse_hidden_size": 32,
+  "prediction_hidden_size": 32,
   "num_epochs": 10,
   "learning_rate": 0.001,
   "device": "cuda",
   "batch_size": {
-    "train": 64,
-    "validation": 64
+    "train": 128,
+    "validation": 128
   },
-  "batches_per_epoch": 100
+  "batches_per_epoch": 100,
+  "modulus_hash_size": 10000
 }
