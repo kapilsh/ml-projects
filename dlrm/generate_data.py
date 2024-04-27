@@ -49,7 +49,8 @@ def process_file(file_path: str) -> None:
             num_chunks = original_chunks
             all_dfs = []
 
-    if num_chunks != 0:
+    if num_chunks != 0 and len(all_dfs) > 0:
+        logger.info("Storing the remaining data to final split")
         _store_data_to_split(file_path, split, all_dfs)
 
 
