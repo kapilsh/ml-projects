@@ -1,7 +1,7 @@
 {
   "data_path": {
-    "train": "/mnt/metaverse-nas/day_0_gz_converted.parquet",
-    "validation": "/mnt/metaverse-nas/day_0_gz_converted.parquet"
+    "train": "/data/day_0_gz_0_converted.parquet",
+    "validation": "/data/day_0_gz_1_converted.parquet"
   },
   "metadata_path": "/mnt/metaverse-nas/criteo_metadata.json",
   "model_path": "/mnt/metaverse-nas/criteo_model.pt",
@@ -46,6 +46,5 @@
     "train": 32,
     "validation": 32
   },
-  "batches_per_epoch": 100,
-  "modulus_hash_size": 1000
+  "batches_per_epoch": 100
 }

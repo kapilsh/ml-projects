@@ -1,3 +1,5 @@
+from typing import List
+
 import pandas as pd
 import numpy as np
 import click
@@ -33,23 +35,32 @@ def process_file(file_path: str) -> None:
     all_dfs = []
     num_chunks = 10
     original_chunks = 10
+    split = 0
 
     for chunk in pd.read_csv(file_path, sep='\t', header=None, names=columns,
                              compression='gzip', chunksize=chunk_size):
-        print(f"Done with {original_chunks - num_chunks}")
+        logger.info(f"Done with {original_chunks - num_chunks}")
         chunk = clean_chunk(chunk)
         all_dfs.append(chunk)
         num_chunks -= 1
         if num_chunks == 0:
-            break
+            _store_data_to_split(file_path, split, all_dfs)
+            split += 1
+            num_chunks = original_chunks
+            all_dfs = []
+
+    if num_chunks != 0:
+        _store_data_to_split(file_path, split, all_dfs)
+
+
+def _store_data_to_split(file_path: str, split: int, all_dfs: List[pd.DataFrame]) -> None:
     result_df = pd.concat(all_dfs)
     # Display the resulting DataFrame
-    print("Total number of rows loaded", len(result_df))
-    print("Total data size", result_df.memory_usage(deep=True).sum() / 10 ** 9,
-          "gb")
-
-    save_file_path = file_path.replace(".", "_") + "_converted.parquet"
+    logger.info(f"Total number of rows loaded: {len(result_df)}")
+    logger.info(f"Total data size : {result_df.memory_usage(deep=True).sum() / 10 ** 9} gb")
+    save_file_path = file_path.replace(".", "_") + f"_{split}_converted.parquet"
     result_df.to_parquet(save_file_path)
+    logger.info("Stored the data split to: {}".format(save_file_path))
 
 
 @click.command()
