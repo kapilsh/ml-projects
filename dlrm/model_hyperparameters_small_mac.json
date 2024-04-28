@@ -1,0 +1,49 @@
+{
+  "data_path": {
+    "train": "/Volumes/nas-drive/criteo_converted/day_0/day_0_gz_0_converted.parquet",
+    "validation": "/Volumes/nas-drive/criteo_converted/day_0/day_0_gz_1_converted.parquet"
+  },
+  "metadata_path": "/Volumes/nas-drive/criteo_metadata.json",
+  "model_path": "/Volumes/nas-drive/criteo_model.pt",
+  "dense_input_feature_size": 13,
+  "sparse_embedding_sizes": {
+    "SPARSE_0": 64,
+    "SPARSE_1": 64,
+    "SPARSE_2": 64,
+    "SPARSE_3": 64,
+    "SPARSE_4": 64,
+    "SPARSE_5": 64,
+    "SPARSE_6": 64,
+    "SPARSE_7": 64,
+    "SPARSE_8": 64,
+    "SPARSE_9": 64,
+    "SPARSE_10": 64,
+    "SPARSE_11": 64,
+    "SPARSE_12": 64,
+    "SPARSE_13": 64,
+    "SPARSE_14": 64,
+    "SPARSE_15": 64,
+    "SPARSE_16": 64,
+    "SPARSE_17": 64,
+    "SPARSE_18": 64,
+    "SPARSE_19": 64,
+    "SPARSE_20": 64,
+    "SPARSE_21": 64,
+    "SPARSE_22": 64,
+    "SPARSE_23": 64,
+    "SPARSE_24": 64,
+    "SPARSE_25": 64
+  },
+  "dense_mlp": {"hidden_layer_sizes":  [32], "output_size": 16},
+  "sparse_mlp": {"hidden_layer_sizes": [128], "output_size": 64},
+  "prediction_hidden_sizes": [16],
+  "num_epochs": 10,
+  "learning_rate": 0.1,
+  "device": "cpu",
+  "batch_size": {
+    "train": 128,
+    "validation": 128
+  },
+  "batches_per_epoch": 100,
+  "modulus_hash_size": 10000
+}

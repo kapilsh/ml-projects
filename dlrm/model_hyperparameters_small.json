@@ -34,17 +34,16 @@
     "SPARSE_24": 16,
     "SPARSE_25": 16
   },
-  "dense_output_size": 16,
-  "sparse_output_size": 16,
-  "dense_hidden_size": 16,
-  "sparse_hidden_size": 16,
-  "prediction_hidden_size": 16,
+  "dense_mlp": {"hidden_layer_sizes":  [32], "output_size": 16},
+  "sparse_mlp": {"hidden_layer_sizes": [32], "output_size": 16},
+  "prediction_hidden_sizes": [16],
   "num_epochs": 10,
   "learning_rate": 0.001,
-  "device": "cuda",
+  "device": "cpu",
   "batch_size": {
     "train": 32,
     "validation": 32
   },
-  "batches_per_epoch": 100
+  "batches_per_epoch": 100,
+  modulus_hash_size: 1000
 }

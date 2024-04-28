@@ -26,8 +26,10 @@ def trace_handler(prof: profile, results_dir: str):
 
 def main():
     # Load hyperparameters
-    with open('model_hyperparameters.json', 'r') as f:
+    with open('model_hyperparameters_small_mac.json', 'r') as f:
         hyperparameters = json.load(f)
+
+    timing_context = {}
 
     logger.info("Hyperparameters: {}".format(hyperparameters))
 
@@ -42,15 +44,15 @@ def main():
     model_parameters = ModelParameters(
         dense_input_feature_size=hyperparameters['dense_input_feature_size'],
         sparse_embedding_sizes=hyperparameters['sparse_embedding_sizes'],
-        dense_output_size=hyperparameters['dense_output_size'],
-        sparse_output_size=hyperparameters['sparse_output_size'],
-        dense_hidden_size=hyperparameters['dense_hidden_size'],
-        sparse_hidden_size=hyperparameters['sparse_hidden_size'],
-        prediction_hidden_size=hyperparameters['prediction_hidden_size'],
+        dense_mlp=hyperparameters['dense_mlp'],
+        sparse_mlp=hyperparameters['sparse_mlp'],
+        prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
         modulus_hash_size=hyperparameters['modulus_hash_size'],
     )
 
-    dlrm = DLRM(metadata=metadata, parameters=model_parameters).to(hyperparameters['device'])
+    dlrm = DLRM(metadata=metadata,
+                parameters=model_parameters,
+                context=timing_context).to(hyperparameters['device'])
     # model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
     model = dlrm
     optimizer = torch.optim.Adam(model.parameters(), lr=hyperparameters['learning_rate'])
@@ -139,6 +141,9 @@ def main():
             writer.add_scalar("Loss/train", train_loss, epoch * hyperparameters['batches_per_epoch'] + batch_idx)
             writer.add_scalar("Accuracy/train", correct_predictions / total_predictions,
                               epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+            for name, t in timing_context.items():
+                writer.add_scalar(f"TrainingTime/{name}", t,
+                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
             prof.step()
 
         logger.info("Train Time taken: {:.2f}s".format(time.time() - start))
@@ -175,6 +180,9 @@ def main():
                 writer.add_scalar("Accuracy/valid",
                                   valid_accuracy,
                                   epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                for name, t in timing_context.items():
+                    writer.add_scalar(f"ValidationTime/{name}", t,
+                                      epoch * hyperparameters['batches_per_epoch'] + batch_idx)
                 prof.step()
 
         logger.info("Validation Time taken: {:.2f}s".format(time.time() - start))
