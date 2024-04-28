@@ -26,7 +26,7 @@ def trace_handler(prof: profile, results_dir: str):
 
 def main():
     # Load hyperparameters
-    with open('model_hyperparameters_small_mac.json', 'r') as f:
+    with open('model_hyperparameters.json', 'r') as f:
         hyperparameters = json.load(f)
 
     timing_context = {}
@@ -47,7 +47,7 @@ def main():
         dense_mlp=hyperparameters['dense_mlp'],
         sparse_mlp=hyperparameters['sparse_mlp'],
         prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
-        modulus_hash_size=hyperparameters['modulus_hash_size'],
+        use_modulus_hash=hyperparameters.get('use_modulus_hash', False),
     )
 
     dlrm = DLRM(metadata=metadata,
@@ -60,10 +60,13 @@ def main():
     # Binary Cross Entropy loss
     criterion = nn.BCELoss()
 
+    batch_size_train = hyperparameters['batch_size']['train']
+    batch_size_valid = hyperparameters['batch_size']['validation']
+
     # DataLoader for your dataset
-    train_loader = iter(DataLoader(train_dataset, batch_size=hyperparameters['batch_size']['train'], shuffle=True))
+    train_loader = iter(DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True))
     valid_loader = iter(
-        DataLoader(valid_dataset, batch_size=hyperparameters['batch_size']['validation'], shuffle=False))
+        DataLoader(valid_dataset, batch_size=batch_size_valid, shuffle=False))
 
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
@@ -74,7 +77,10 @@ def main():
 
     start_time_all = time.time()
 
-    writer = SummaryWriter(log_dir="tb_logs", flush_secs=30)
+    writer = SummaryWriter(log_dir=hyperparameters["tensorboard_dir"], flush_secs=30)
+    _, dense, sparse = next(train_loader)
+    writer.add_graph(dlrm, [dense.to(hyperparameters['device']), sparse.to(hyperparameters['device'])])
+
     prof = torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -96,7 +102,7 @@ def main():
             repeat=1),
         # on_trace_ready=partial(trace_handler,
         #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('tb_logs')
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"])
         # used when outputting for tensorboard
     )
     prof.start()
@@ -138,12 +144,12 @@ def main():
             # Update total and correct predictions
             total_predictions += labels.size(0)
             correct_predictions += (predicted == labels).sum().item()
-            writer.add_scalar("Loss/train", train_loss, epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+            index = (epoch * hyperparameters['batches_per_epoch'] + batch_idx) * batch_size_train
+            writer.add_scalar("Loss/train", train_loss, index)
             writer.add_scalar("Accuracy/train", correct_predictions / total_predictions,
-                              epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                              index)
             for name, t in timing_context.items():
-                writer.add_scalar(f"TrainingTime/{name}", t,
-                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                writer.add_scalar(f"TrainingTime/{name}", t, index)
             prof.step()
 
         logger.info("Train Time taken: {:.2f}s".format(time.time() - start))
@@ -174,15 +180,16 @@ def main():
                 total_predictions += labels.size(0)
                 correct_predictions += (predicted == labels).sum().item()
                 valid_accuracy = correct_predictions / total_predictions
+                index = (epoch * hyperparameters['batches_per_epoch'] + batch_idx) * batch_size_valid
                 writer.add_scalar("Loss/valid",
                                   valid_loss,
-                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                                  index)
                 writer.add_scalar("Accuracy/valid",
                                   valid_accuracy,
-                                  epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                                  index)
                 for name, t in timing_context.items():
                     writer.add_scalar(f"ValidationTime/{name}", t,
-                                      epoch * hyperparameters['batches_per_epoch'] + batch_idx)
+                                      index)
                 prof.step()
 
         logger.info("Validation Time taken: {:.2f}s".format(time.time() - start))

@@ -1,10 +1,11 @@
 {
   "data_path": {
-    "train": "/mnt/metaverse-nas/day_0_gz_converted.parquet",
-    "validation": "/mnt/metaverse-nas/day_0_gz_converted.parquet"
+    "train": "/home/ksharma/data/day_0/day_0_gz_0_converted.parquet",
+    "validation": "/home/ksharma/data/day_0/day_0_gz_0_converted.parquet"
   },
   "metadata_path": "/mnt/metaverse-nas/criteo_metadata.json",
   "model_path": "/mnt/metaverse-nas/criteo_model.pt",
+  "tensorboard_dir": "/mnt/metaverse-nas/tb_logs_dlrm",
   "dense_input_feature_size": 13,
   "sparse_embedding_sizes": {
     "SPARSE_0": 16,
@@ -34,18 +35,16 @@
     "SPARSE_24": 16,
     "SPARSE_25": 16
   },
-  "dense_output_size": 16,
-  "sparse_output_size": 16,
-  "dense_hidden_size": 16,
-  "sparse_hidden_size": 16,
-  "prediction_hidden_size": 16,
+  "dense_mlp": {"hidden_layer_sizes":  [16], "output_size": 16},
+  "sparse_mlp": {"hidden_layer_sizes": [16], "output_size": 32},
+  "prediction_hidden_sizes": [16],
   "num_epochs": 10,
-  "learning_rate": 0.001,
+  "learning_rate": 0.01,
   "device": "cuda",
   "batch_size": {
-    "train": 32,
-    "validation": 32
+    "train": 64,
+    "validation": 64
   },
   "batches_per_epoch": 100,
-  "modulus_hash_size": 1000
+  "use_modulus_hash": false
 }

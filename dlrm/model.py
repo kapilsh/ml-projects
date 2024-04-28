@@ -43,8 +43,9 @@ class TimedModule(nn.Module):
     def __init__(self, context: Dict[str, float], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.timing_context = context
-        self.register_forward_pre_hook(self._register_forward_pre_hook)
-        self.register_forward_hook(self._register_forward_hook)
+        if not torch.jit.is_scripting():
+            self.register_forward_pre_hook(self._register_forward_pre_hook)
+            self.register_forward_hook(self._register_forward_hook)
 
     def _register_forward_pre_hook(
         self, *args, **kwargs
@@ -56,7 +57,7 @@ class TimedModule(nn.Module):
             self, *args, **kwargs
     ) -> Any:
         name = self.__class__.__name__
-        self.timing_context[name] = time.time() - self.timing_context[name]
+        self.timing_context[name] = (time.time() - self.timing_context[name]) * 1000000
 
 
 class MLP(nn.Module):
@@ -108,19 +109,16 @@ class SparseFeatureLayer(nn.Module):
 
 
 class SparseArch(TimedModule):
-    def __init__(self, metadata: Dict[str, Union[int, List[int]]],
+    def __init__(self, metadata: Dict[str, Union[int, List[int], Dict[str, int]]],
                  embedding_sizes: Mapping[str, int],
                  hidden_layer_sizes: List[int],
                  output_size: int,
-                 modulus_hash_size: Optional[int] = None,
+                 use_modulus_hash: bool = False,
                  *args, **kwargs) -> None:
         super(SparseArch, self).__init__(*args, **kwargs)
-        self.use_modulus_hash = modulus_hash_size is not None
+        self.use_modulus_hash = use_modulus_hash
         self.num_sparse_features = len(metadata)
-        # Create Embedding layers for each sparse feature
-        self._modulus_hash_sizes = [min(m["cardinality"], modulus_hash_size or m["cardinality"]) for m in
-                                    metadata.values()]
-
+        self._modulus_hash_sizes = [m["cardinality"] for m in metadata.values()]
         self.sparse_layers = nn.ModuleList([
             SparseFeatureLayer(cardinality=self._modulus_hash_sizes[i],
                                embedding_size=embedding_sizes[feature_name],
@@ -192,7 +190,7 @@ class Parameters:
     dense_mlp: Dict[str, Union[List[int], int]]
     sparse_mlp: Dict[str, Union[List[int], int]]
     prediction_hidden_sizes: List[int]
-    modulus_hash_size: Optional[int] = None
+    use_modulus_hash: bool = False
 
 
 class DLRM(TimedModule):
@@ -211,14 +209,14 @@ class DLRM(TimedModule):
             embedding_sizes=parameters.sparse_embedding_sizes,
             hidden_layer_sizes=parameters.sparse_mlp["hidden_layer_sizes"],
             output_size=parameters.sparse_mlp["output_size"],
-            modulus_hash_size=parameters.modulus_hash_size,
+            use_modulus_hash=parameters.use_modulus_hash,
             context=self.timing_context)
         self.interaction_layer = DenseSparseInteractionLayer(
             context=self.timing_context)
         self.prediction_layer = PredictionLayer(
             dense_out_size=parameters.dense_mlp["output_size"],
-            sparse_out_sizes=[parameters.sparse_mlp["output_size"]] * len(
-                parameters.sparse_embedding_sizes),
+            sparse_out_sizes=[parameters.sparse_embedding_sizes[f"SPARSE_{i}"] for i in
+                              range(len(parameters.sparse_embedding_sizes))],
             hidden_sizes=parameters.prediction_hidden_sizes,
             context=self.timing_context
         )
@@ -312,7 +310,9 @@ def dry_run_with_data(file_path, metadata_path):
             "output_size": 16
         },
         prediction_hidden_sizes=[16],
-        modulus_hash_size=1000
+        # use_modulus_hash=False, # torch.compile fails (OOMS)
+        use_modulus_hash=True
+
     )
     import torch._dynamo
     torch._dynamo.reset()
