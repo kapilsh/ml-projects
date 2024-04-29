@@ -39,26 +39,6 @@ torch._dynamo.reset()
 # input:
 # [ dense features ]     [sparse indices] , ..., [sparse indices]
 
-class TimedModule(nn.Module):
-    def __init__(self, context: Dict[str, float], *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.timing_context = context
-        if not torch.jit.is_scripting():
-            self.register_forward_pre_hook(self._register_forward_pre_hook)
-            self.register_forward_hook(self._register_forward_hook)
-
-    def _register_forward_pre_hook(
-        self, *args, **kwargs
-    ) -> Any:
-        name = self.__class__.__name__
-        self.timing_context[name] = time.time()
-
-    def _register_forward_hook(
-            self, *args, **kwargs
-    ) -> Any:
-        name = self.__class__.__name__
-        self.timing_context[name] = (time.time() - self.timing_context[name]) * 1000000
-
 
 class MLP(nn.Module):
     def __init__(self, input_size: int, hidden_sizes: List[int], output_size: int):
@@ -76,7 +56,7 @@ class MLP(nn.Module):
         return self.fc_layers(x)
 
 
-class DenseArch(TimedModule):
+class DenseArch(nn.Module):
     def __init__(self,
                  dense_feature_count: int,
                  dense_hidden_layers_sizes: List[int],
@@ -108,7 +88,7 @@ class SparseFeatureLayer(nn.Module):
         return embeddings
 
 
-class SparseArch(TimedModule):
+class SparseArch(nn.Module):
     def __init__(self, metadata: Dict[str, Union[int, List[int], Dict[str, int]]],
                  embedding_sizes: Mapping[str, int],
                  hidden_layer_sizes: List[int],
@@ -155,7 +135,7 @@ class SparseArch(TimedModule):
         return output_values
 
 
-class DenseSparseInteractionLayer(TimedModule):
+class DenseSparseInteractionLayer(nn.Module):
     def __init__(self, *args, **kwargs):
         super(DenseSparseInteractionLayer, self).__init__(*args, **kwargs)
     def forward(self, dense_out: torch.Tensor,
@@ -166,7 +146,7 @@ class DenseSparseInteractionLayer(TimedModule):
         return flattened
 
 
-class PredictionLayer(TimedModule):
+class PredictionLayer(nn.Module):
     def __init__(self,
                  dense_out_size: int,
                  sparse_out_sizes: List[int],
@@ -193,7 +173,7 @@ class Parameters:
     use_modulus_hash: bool = False
 
 
-class DLRM(TimedModule):
+class DLRM(nn.Module):
     def __init__(self, metadata: Dict[str, Union[int, List[int]]],
                  parameters: Parameters,
                  *wargs, **kwargs):
@@ -202,23 +182,19 @@ class DLRM(TimedModule):
             dense_feature_count=parameters.dense_input_feature_size,
             dense_hidden_layers_sizes=parameters.dense_mlp[
                 "hidden_layer_sizes"],
-            output_size=parameters.dense_mlp["output_size"],
-            context=self.timing_context)
+            output_size=parameters.dense_mlp["output_size"])
         self.sparse_layer = SparseArch(
             metadata=metadata,
             embedding_sizes=parameters.sparse_embedding_sizes,
             hidden_layer_sizes=parameters.sparse_mlp["hidden_layer_sizes"],
             output_size=parameters.sparse_mlp["output_size"],
-            use_modulus_hash=parameters.use_modulus_hash,
-            context=self.timing_context)
-        self.interaction_layer = DenseSparseInteractionLayer(
-            context=self.timing_context)
+            use_modulus_hash=parameters.use_modulus_hash)
+        self.interaction_layer = DenseSparseInteractionLayer()
         self.prediction_layer = PredictionLayer(
             dense_out_size=parameters.dense_mlp["output_size"],
             sparse_out_sizes=[parameters.sparse_embedding_sizes[f"SPARSE_{i}"] for i in
                               range(len(parameters.sparse_embedding_sizes))],
             hidden_sizes=parameters.prediction_hidden_sizes,
-            context=self.timing_context
         )
 
     def forward(self, dense_features: torch.Tensor,
@@ -254,14 +230,11 @@ def dry_run_with_data(file_path, metadata_path):
     logger.info("Dense size: {}".format(dense.size()))
     logger.info("Sparse size: {}".format(sparse.size()))
 
-    timing_context = {}
-
     dense_mlp_out_size = 16
     num_dense_features = dense.size()[1]
     dense_arch = DenseArch(dense_feature_count=num_dense_features,
                            dense_hidden_layers_sizes=[32],
-                           output_size=dense_mlp_out_size,
-                           context=timing_context)
+                           output_size=dense_mlp_out_size)
     # dense_arch_optim = torch.compile(dense_arch)
     dense_out = dense_arch(dense)
     logger.info("Dense out size: {}".format(dense_out.size()))
@@ -273,23 +246,21 @@ def dry_run_with_data(file_path, metadata_path):
     sparse_arch = SparseArch(metadata=metadata,
                              embedding_sizes=embedding_sizes,
                              hidden_layer_sizes=[32],
-                             output_size=sparse_mlp_out_size,
-                             context=timing_context)
+                             output_size=sparse_mlp_out_size)
     # compiled model hangs on running with inputs
     # sparse_arch_optim = torch.compile(sparse_arch)
     sparse_out = sparse_arch(sparse)
     for v in sparse_out:
         logger.info("Sparse out size: {}".format(v.size()))
 
-    dense_sparse_interaction_layer = DenseSparseInteractionLayer(context=timing_context)
+    dense_sparse_interaction_layer = DenseSparseInteractionLayer()
     # dense_sparse_interaction_layer_optim = torch.compile(dense_sparse_interaction_layer)
     ds_out = dense_sparse_interaction_layer(dense_out, sparse_out)
     logger.info("Dense sparse interaction out size: {}".format(ds_out.size()))
 
     prediction_layer = PredictionLayer(dense_out_size=dense_mlp_out_size,
                                        sparse_out_sizes=[sparse_mlp_out_size] * len(metadata),
-                                       hidden_sizes=[16],
-                                       context=timing_context)
+                                       hidden_sizes=[16])
     # prediction_layer_optim = torch.compile(prediction_layer)
     pred_out = prediction_layer(ds_out)
     logger.info("Prediction out size: {}".format(pred_out.size()))
@@ -317,7 +288,7 @@ def dry_run_with_data(file_path, metadata_path):
     import torch._dynamo
     torch._dynamo.reset()
     torch._dynamo.config.verbose = True
-    dlrm = DLRM(metadata, parameters, context=timing_context)
+    dlrm = DLRM(metadata, parameters)
     _ = dlrm(dense, sparse)
 
     # dlrm_optim = torch.compile(dlrm, backend="aot_eager")

@@ -46,5 +46,5 @@
     "validation": 64
   },
   "batches_per_epoch": 100,
-  "use_modulus_hash": false
+  "use_modulus_hash": true
 }

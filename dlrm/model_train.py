@@ -15,13 +15,21 @@ from model import DLRM, read_metadata, Parameters as ModelParameters
 from torch.profiler import profile, record_function, ProfilerActivity
 from torch.utils.tensorboard import SummaryWriter
 
-
 logger.add("train_logs/dlrm_model_train_{time}.log")
+
 
 def trace_handler(prof: profile, results_dir: str):
     logger.info("\n" + prof.key_averages().table(
         sort_by="self_cuda_time_total", row_limit=-1))
     prof.export_chrome_trace(f"/{results_dir}/test_trace_" + str(uuid.uuid4()) + ".json")
+
+
+def timer_start(context, module, *args, **kwargs):
+    context[module.__class__.__name__] = time.time()
+
+
+def timer_end(context, module, *args, **kwargs):
+    context[module.__class__.__name__] = (time.time() - context[module.__class__.__name__]) * 1000000
 
 
 def main():
@@ -47,14 +55,19 @@ def main():
         dense_mlp=hyperparameters['dense_mlp'],
         sparse_mlp=hyperparameters['sparse_mlp'],
         prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
-        use_modulus_hash=hyperparameters.get('use_modulus_hash', False),
+        use_modulus_hash=hyperparameters['use_modulus_hash'],
     )
 
     dlrm = DLRM(metadata=metadata,
-                parameters=model_parameters,
-                context=timing_context).to(hyperparameters['device'])
-    # model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
-    model = dlrm
+                parameters=model_parameters).to(hyperparameters['device'])
+    #
+    # for layer in dlrm.children():
+    #     layer.register_forward_pre_hook(partial(timer_start, timing_context, layer))
+    #     layer.register_forward_hook(partial(timer_end, timing_context, layer))
+
+    model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
+
+    # model = dlrm
     optimizer = torch.optim.Adam(model.parameters(), lr=hyperparameters['learning_rate'])
 
     # Binary Cross Entropy loss
@@ -68,8 +81,14 @@ def main():
     valid_loader = iter(
         DataLoader(valid_dataset, batch_size=batch_size_valid, shuffle=False))
 
+    _, dense, sparse = next(train_loader)
+    compile_start_time = time.time()
+    _ = model(dense.to(hyperparameters['device']), sparse.to(hyperparameters['device']))
+    logger.info("Compile Time taken: {:.2f}s".format(time.time() - compile_start_time))
+
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
+    # num_epochs = 1
     torch.cuda.empty_cache()
 
     # Initialize the best validation loss to a high value
@@ -78,8 +97,6 @@ def main():
     start_time_all = time.time()
 
     writer = SummaryWriter(log_dir=hyperparameters["tensorboard_dir"], flush_secs=30)
-    _, dense, sparse = next(train_loader)
-    writer.add_graph(dlrm, [dense.to(hyperparameters['device']), sparse.to(hyperparameters['device'])])
 
     prof = torch.profiler.profile(
         activities=[
@@ -102,7 +119,9 @@ def main():
             repeat=1),
         # on_trace_ready=partial(trace_handler,
         #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"])
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"]),
+        record_shapes=True,
+        profile_memory=True
         # used when outputting for tensorboard
     )
     prof.start()
