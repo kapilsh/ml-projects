@@ -52,6 +52,7 @@ class MLP(nn.Module):
             fc_layers.append(nn.ReLU())
         fc_layers.append(nn.Linear(hidden_sizes[-1], output_size))
         self.fc_layers = nn.Sequential(*fc_layers)
+
     def forward(self, x: torch.Tensor):
         return self.fc_layers(x)
 
@@ -94,6 +95,7 @@ class SparseArch(nn.Module):
                  hidden_layer_sizes: List[int],
                  output_size: int,
                  use_modulus_hash: bool = False,
+                 device: str = "cpu",
                  *args, **kwargs) -> None:
         super(SparseArch, self).__init__(*args, **kwargs)
         self.use_modulus_hash = use_modulus_hash
@@ -108,6 +110,7 @@ class SparseArch(nn.Module):
 
         # Create mapping for each sparse feature
         self.mapping = [metadata[f"SPARSE_{i}"]["tokenizer_values"] for i in range(self.num_sparse_features)]
+        self.cardinality_tensor = torch.tensor(self._modulus_hash_sizes).to(device)
 
     @staticmethod
     def index_hash(tensor: torch.Tensor, tokenizer_values: List[int]):
@@ -123,21 +126,28 @@ class SparseArch(nn.Module):
     def modulus_hash(tensor: torch.Tensor, cardinality: int):
         return (tensor + 1) % cardinality
 
+    @staticmethod
+    def modulus_hash_opt(tensor: torch.Tensor, cardinality: torch.Tensor):
+        return (tensor + 1) % cardinality
+
     def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
-        output_values = []
-        for i in range(self.num_sparse_features):
-            if self.use_modulus_hash:
-                indices = self.modulus_hash(inputs[:, i], self._modulus_hash_sizes[i])
-            else:
-                indices = self.index_hash(inputs[:, i], self.mapping[i])
-            sparse_out = self.sparse_layers[i](indices)
-            output_values.append(sparse_out)
-        return output_values
+        sparse_hashed = self.modulus_hash_opt(inputs, self.cardinality_tensor)
+        return [sparse_layer(sparse_hashed[:, i]) for i, sparse_layer in enumerate(self.sparse_layers)]
+
+        # def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
+        # output_values = []
+
+        # for i in range(self.num_sparse_features):
+        #     if self.use_modulus_hash:
+        #         indices = self.modulus_hash(inputs[:, i], self._modulus_hash_sizes[i])
+        #     else:
+        #         indices = self.index_hash(inputs[:, i], self.mapping[i])
+        #     sparse_out = self.sparse_layers[i](indices)
+        #     output_values.append(sparse_out)
+        # return output_values
 
 
 class DenseSparseInteractionLayer(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super(DenseSparseInteractionLayer, self).__init__(*args, **kwargs)
     def forward(self, dense_out: torch.Tensor,
                 sparse_out: List[torch.Tensor]) -> Tensor:
         concat = torch.cat([dense_out] + sparse_out, dim=-1).unsqueeze(2)
@@ -176,8 +186,8 @@ class Parameters:
 class DLRM(nn.Module):
     def __init__(self, metadata: Dict[str, Union[int, List[int]]],
                  parameters: Parameters,
-                 *wargs, **kwargs):
-        super(DLRM, self).__init__(*wargs, **kwargs)
+                 device: str = "cpu"):
+        super(DLRM, self).__init__()
         self.dense_layer = DenseArch(
             dense_feature_count=parameters.dense_input_feature_size,
             dense_hidden_layers_sizes=parameters.dense_mlp[
@@ -188,7 +198,9 @@ class DLRM(nn.Module):
             embedding_sizes=parameters.sparse_embedding_sizes,
             hidden_layer_sizes=parameters.sparse_mlp["hidden_layer_sizes"],
             output_size=parameters.sparse_mlp["output_size"],
-            use_modulus_hash=parameters.use_modulus_hash)
+            use_modulus_hash=parameters.use_modulus_hash,
+            device=device
+        )
         self.interaction_layer = DenseSparseInteractionLayer()
         self.prediction_layer = PredictionLayer(
             dense_out_size=parameters.dense_mlp["output_size"],

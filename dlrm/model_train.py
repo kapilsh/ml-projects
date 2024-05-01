@@ -59,7 +59,8 @@ def main():
     )
 
     dlrm = DLRM(metadata=metadata,
-                parameters=model_parameters).to(hyperparameters['device'])
+                parameters=model_parameters,
+                device=hyperparameters['device']).to(hyperparameters['device'])
     #
     # for layer in dlrm.children():
     #     layer.register_forward_pre_hook(partial(timer_start, timing_context, layer))
@@ -88,7 +89,6 @@ def main():
 
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
-    # num_epochs = 1
     torch.cuda.empty_cache()
 
     # Initialize the best validation loss to a high value
@@ -121,7 +121,8 @@ def main():
         #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
         on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"]),
         record_shapes=True,
-        profile_memory=True
+        profile_memory=True,
+        with_stack=True
         # used when outputting for tensorboard
     )
     prof.start()
