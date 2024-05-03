@@ -20,4 +20,6 @@ pytorch_cpp/cmake-build-debug/
 dlrm/profiler_logs/
 embeddings/.ipynb_checkpoints/
 embeddings/__pycache__/
+dlrm/kernels/third-party/
+dlrm/kernels/cmake-build-debug/
 
