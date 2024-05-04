@@ -128,18 +128,22 @@ def call(args):
         torch.cuda.set_device(0) # no-op to ensure context
         buf0 = empty((7, 8), device='cuda', dtype=torch.float32)
         # Source Nodes: [], Original ATen: []
+        # X1 <- X @ W1 [7 X 8]
         extern_kernels.mm(primals_9, reinterpret_tensor(primals_1, (16, 8), (1, 16), 0), out=buf0)
         del primals_1
         buf1 = empty((7, 5), device='cuda', dtype=torch.float32)
         # Source Nodes: [matmul], Original ATen: [aten.mm]
+        # xa1 <- X @ A1 [7 X 5]
         extern_kernels.mm(primals_9, primals_5, out=buf1)
         del primals_5
         buf2 = empty((7, 8), device='cuda', dtype=torch.float32)
         # Source Nodes: [matmul_1], Original ATen: [aten.mm]
+        # xa2 <- xa1 @ B1 [7 X 8] <- 7 X 5 @ 5 X 8
         extern_kernels.mm(buf1, primals_6, out=buf2)
         buf3 = buf0; del buf0  # reuse
         # Source Nodes: [add, l__self___layers_1, x], Original ATen: [aten.add, aten.mul, aten.relu]
         stream0 = get_cuda_stream(0)
+        # out1 = relu(add(xa2, X1)) [7 X 8]
         triton_poi_fused_add_mul_relu_0.run(buf3, primals_2, buf2, 56, grid=grid(56), stream=stream0)
         del buf2
         del primals_2
