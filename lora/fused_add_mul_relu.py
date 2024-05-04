@@ -3,7 +3,7 @@ from typing import Tuple
 import torch
 import triton
 import triton.language as tl
-from torch import nn
+
 
 @triton.jit
 def fused_add_mul_relu(in_out_ptr0, in_ptr0, in_ptr1, xnumel, BLOCK_SIZE: tl.constexpr):
@@ -24,7 +24,8 @@ def fused_add_mul_relu(in_out_ptr0, in_ptr0, in_ptr1, xnumel, BLOCK_SIZE: tl.con
 
 
 @triton.jit
-def fused_add_mul_relu_cleaner(dense_in_out_ptr, scalar_ptr, dense_ptr, num_weights, xnumel, multiplier, BLOCK_SIZE: tl.constexpr):
+def fused_add_mul_relu_cleaner(dense_in_out_ptr, scalar_ptr, dense_ptr, num_weights, xnumel, multiplier,
+                               BLOCK_SIZE: tl.constexpr):
     xoffset = tl.program_id(0) * BLOCK_SIZE
     index = xoffset + tl.arange(0, BLOCK_SIZE)[:]
     mask = index < xnumel
@@ -47,7 +48,8 @@ def fused_add_mul_relu_torch(in_out_tensor: torch.Tensor, bias: torch.Tensor, in
     return in_out_tensor
 
 
-def fused_add_mul_relu_cleaner_torch(in_out_tensor: torch.Tensor, bias: torch.Tensor, in_tensor: torch.Tensor) -> torch.Tensor:
+def fused_add_mul_relu_cleaner_torch(in_out_tensor: torch.Tensor, bias: torch.Tensor,
+                                     in_tensor: torch.Tensor) -> torch.Tensor:
     # print("calling fused_add_mul_relu_torch")
     grid = lambda meta: (triton.cdiv(in_out_tensor.numel(), meta['BLOCK_SIZE']),)
     BLOCK_SIZE = min(1024, in_out_tensor.numel())
@@ -56,7 +58,8 @@ def fused_add_mul_relu_cleaner_torch(in_out_tensor: torch.Tensor, bias: torch.Te
         in_out_tensor, bias, in_tensor, num_weights, in_out_tensor.numel(), multiplier=0.5, BLOCK_SIZE=BLOCK_SIZE)
     return in_out_tensor
 
-def get_inputs(batch_size:int = 8, weight_size: int = 8, add_manual_size: bool = False):
+
+def get_inputs(batch_size: int = 8, weight_size: int = 8, add_manual_size: bool = False):
     if add_manual_size:
         torch.manual_seed(0)
     dense_size = (batch_size, weight_size)
@@ -69,7 +72,8 @@ def get_inputs(batch_size:int = 8, weight_size: int = 8, add_manual_size: bool =
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['batch_size', 'weight_size'],  # Argument names to use as an x-axis for the plot.
-        x_vals=[(2**i, 2 ** j)  for i, j in zip(range(2, 20, 2), range(2, 11, 1))],  # Different possible values for `x_name`.
+        x_vals=[(2 ** i, 2 ** j) for i, j in zip(range(2, 20, 2), range(2, 11, 1))],
+        # Different possible values for `x_name`.
         x_log=True,  # x axis is logarithmic.
         line_arg='provider',  # Argument name whose value corresponds to a different line in the plot.
         line_vals=['torch.compile.generated', 'cleaner'],  # Possible values for `line_arg`.
@@ -83,9 +87,11 @@ def benchmark(batch_size, weight_size, provider):
     in_out_tensor, in_tensor, bias = get_inputs(batch_size=batch_size, weight_size=weight_size, add_manual_size=True)
     quantiles = [0.5, 0.2, 0.8]
     if provider == "torch.compile.generated":
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: fused_add_mul_relu_torch(in_out_tensor, bias, in_tensor), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(lambda: fused_add_mul_relu_torch(in_out_tensor, bias, in_tensor),
+                                                     quantiles=quantiles)
     if provider == "cleaner":
-        ms, min_ms, max_ms = triton.testing.do_bench(lambda: fused_add_mul_relu_cleaner_torch(in_out_tensor, bias, in_tensor), quantiles=quantiles)
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: fused_add_mul_relu_cleaner_torch(in_out_tensor, bias, in_tensor), quantiles=quantiles)
     gbps = lambda ms: 12 * (batch_size * weight_size) / ms * 1e-6
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
@@ -105,7 +111,8 @@ if __name__ == '__main__':
 
     in_out_tensor, in_tensor, bias = get_inputs(add_manual_size=True)
     num_weights = bias.numel()
-    fused_add_mul_relu_cleaner[grid](in_out_tensor, bias, in_tensor, num_weights,in_out_tensor.numel(), multiplier=0.5, BLOCK_SIZE=BLOCK_SIZE)
+    fused_add_mul_relu_cleaner[grid](in_out_tensor, bias, in_tensor, num_weights, in_out_tensor.numel(), multiplier=0.5,
+                                     BLOCK_SIZE=BLOCK_SIZE)
     print("Output 2", in_out_tensor)
     torch.testing.assert_close(in_out_tensor, expected_output, rtol=1e-4, atol=1e-4)
 

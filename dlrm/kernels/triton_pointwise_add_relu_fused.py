@@ -10,10 +10,13 @@ def pointwise_add_relu_fusion_512(in_out_ptr0, in_ptr0, XBLOCK : tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
+    # dense @ weights
     x2 = xindex
+    # bias
     x0 = xindex % 512
     tmp0 = tl.load(in_out_ptr0 + (x2), xmask)
     tmp1 = tl.load(in_ptr0 + (x0), xmask, eviction_policy='evict_last')
+    # bias + dense @ weights
     tmp2 = tmp0 + tmp1
     tmp3 = triton_helpers.maximum(0, tmp2)
     tl.store(in_out_ptr0 + (x2), tmp3, None)
