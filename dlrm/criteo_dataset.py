@@ -1,3 +1,7 @@
+import os
+from typing import Tuple, List
+import pyarrow.parquet as pq
+
 import torch
 import pandas as pd
 import click
@@ -7,14 +11,29 @@ from loguru import logger
 
 
 class CriteoParquetDataset(Dataset):
-    def __init__(self, file_name: str):
-        df = pd.read_parquet(file_name)
-        self.total_rows = len(df)
-        self.label_tensor = torch.from_numpy(df["labels"].values).to(torch.float32)
+    def __init__(self, path: str):
+        self._all_file_paths = [f for f in os.listdir(path)]
+
+    def _read_one_file(self, file_path) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        df = pd.read_parquet(file_path)
+        label_tensor = torch.from_numpy(df["labels"].values).to(torch.float32)
         dense_columns = [f for f in df.columns if f.startswith("DENSE")]
         sparse_columns = [f for f in df.columns if f.startswith("SPARSE")]
-        self.dense_tensor = torch.from_numpy(df[dense_columns].values)
-        self.sparse_tensor = torch.from_numpy(df[sparse_columns].values)
+        dense_tensor = torch.from_numpy(df[dense_columns].values)
+        sparse_tensor = torch.from_numpy(df[sparse_columns].values)
+        return (label_tensor, dense_tensor, sparse_tensor)
+
+    def _get_file_sizes(self, file_paths) -> List[int]:
+        file_sizes = []
+        for file_path in file_paths:
+            # Open the Parquet file
+            parquet_file = pq.ParquetFile(file_path)
+
+            # Get the number of rows in the Parquet file
+            num_rows = parquet_file.metadata.num_rows
+            logger.info(f"Number of rows in {parquet_file} = {num_rows}")
+            file_sizes.append(num_rows)
+        return file_sizes
 
     def __len__(self):
         return self.total_rows

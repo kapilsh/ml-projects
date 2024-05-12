@@ -61,10 +61,6 @@ def main():
     dlrm = DLRM(metadata=metadata,
                 parameters=model_parameters,
                 device=hyperparameters['device']).to(hyperparameters['device'])
-    #
-    # for layer in dlrm.children():
-    #     layer.register_forward_pre_hook(partial(timer_start, timing_context, layer))
-    #     layer.register_forward_hook(partial(timer_end, timing_context, layer))
 
     model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
 
