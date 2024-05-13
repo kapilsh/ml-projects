@@ -1,7 +1,11 @@
 {
   "data_path": {
-    "train": "/home/ksharma/data/day_0/day_0_gz_0_converted.parquet",
-    "validation": "/home/ksharma/data/day_0/day_0_gz_0_converted.parquet"
+    "train": [
+      "/mnt/metaverse-nas/criteo_converted/day_0",
+      "/mnt/metaverse-nas/criteo_converted/day_1"
+    ],
+    "validation": [
+      "/mnt/metaverse-nas/criteo_converted/day_23"]
   },
   "metadata_path": "/mnt/metaverse-nas/criteo_metadata.json",
   "model_path": "/mnt/metaverse-nas/criteo_model.pt",
@@ -35,9 +39,24 @@
     "SPARSE_24": 16,
     "SPARSE_25": 16
   },
-  "dense_mlp": {"hidden_layer_sizes":  [512, 256, 64], "output_size": 16},
-  "sparse_mlp": {"hidden_layer_sizes": [16], "output_size": 32},
-  "prediction_hidden_sizes": [512, 256],
+  "dense_mlp": {
+    "hidden_layer_sizes": [
+      512,
+      256,
+      64
+    ],
+    "output_size": 16
+  },
+  "sparse_mlp": {
+    "hidden_layer_sizes": [
+      16
+    ],
+    "output_size": 32
+  },
+  "prediction_hidden_sizes": [
+    512,
+    256
+  ],
   "num_epochs": 10,
   "learning_rate": 0.1,
   "device": "cuda",

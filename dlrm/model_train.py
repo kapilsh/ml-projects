@@ -1,6 +1,7 @@
 import time
 import uuid
 from functools import partial
+from sys import platform
 
 import torch
 from torch import nn
@@ -21,7 +22,8 @@ logger.add("train_logs/dlrm_model_train_{time}.log")
 def trace_handler(prof: profile, results_dir: str):
     logger.info("\n" + prof.key_averages().table(
         sort_by="self_cuda_time_total", row_limit=-1))
-    prof.export_chrome_trace(f"/{results_dir}/test_trace_" + str(uuid.uuid4()) + ".json")
+    prof.export_chrome_trace(
+        f"/{results_dir}/test_trace_" + str(uuid.uuid4()) + ".json")
 
 
 def timer_start(context, module, *args, **kwargs):
@@ -29,7 +31,8 @@ def timer_start(context, module, *args, **kwargs):
 
 
 def timer_end(context, module, *args, **kwargs):
-    context[module.__class__.__name__] = (time.time() - context[module.__class__.__name__]) * 1000000
+    context[module.__class__.__name__] = (time.time() - context[
+        module.__class__.__name__]) * 1000000
 
 
 def main():
@@ -41,11 +44,27 @@ def main():
 
     logger.info("Hyperparameters: {}".format(hyperparameters))
 
-    metadata = read_metadata(hyperparameters['metadata_path'])
+    if platform == "darwin":
+        metadata_path = hyperparameters['metadata_path'].replace(
+            "/mnt/metaverse-nas", "/Volumes/nas-drive")
+    else:
+        metadata_path = hyperparameters['metadata_path']
+    metadata = read_metadata(metadata_path)
     logger.info("Loaded metadata")
 
-    train_dataset = CriteoParquetDataset(hyperparameters['data_path']['train'])
-    valid_dataset = CriteoParquetDataset(hyperparameters['data_path']['validation'])
+    train_dirs = hyperparameters['data_path']['train']
+    valid_dirs = hyperparameters['data_path']['validation']
+
+    if platform == "darwin":
+        train_dirs = [d.replace("/mnt/metaverse-nas", "/Volumes/nas-drive") for
+                      d in train_dirs]
+        valid_dirs = [d.replace("/mnt/metaverse-nas", "/Volumes/nas-drive") for
+                      d in valid_dirs]
+
+    train_dataset = CriteoParquetDataset(
+        path=train_dirs)
+    valid_dataset = CriteoParquetDataset(
+        path=valid_dirs)
 
     logger.info("Loaded datasets")
 
@@ -53,19 +72,20 @@ def main():
         dense_input_feature_size=hyperparameters['dense_input_feature_size'],
         sparse_embedding_sizes=hyperparameters['sparse_embedding_sizes'],
         dense_mlp=hyperparameters['dense_mlp'],
-        sparse_mlp=hyperparameters['sparse_mlp'],
         prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
         use_modulus_hash=hyperparameters['use_modulus_hash'],
     )
 
-    dlrm = DLRM(metadata=metadata,
-                parameters=model_parameters,
-                device=hyperparameters['device']).to(hyperparameters['device'])
+    device = "cpu" if platform == "darwin" else hyperparameters['device']
+
+    dlrm = DLRM(metadata=metadata, parameters=model_parameters,
+                device=device).to(device)
 
     model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
 
     # model = dlrm
-    optimizer = torch.optim.Adam(model.parameters(), lr=hyperparameters['learning_rate'])
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=hyperparameters['learning_rate'])
 
     # Binary Cross Entropy loss
     criterion = nn.BCELoss()
@@ -73,15 +93,19 @@ def main():
     batch_size_train = hyperparameters['batch_size']['train']
     batch_size_valid = hyperparameters['batch_size']['validation']
 
+    logger.info("Getting data loaders")
+
     # DataLoader for your dataset
-    train_loader = iter(DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True))
+    train_loader = iter(
+        DataLoader(train_dataset, batch_size=batch_size_train, shuffle=False))
     valid_loader = iter(
         DataLoader(valid_dataset, batch_size=batch_size_valid, shuffle=False))
 
     _, dense, sparse = next(train_loader)
     compile_start_time = time.time()
-    _ = model(dense.to(hyperparameters['device']), sparse.to(hyperparameters['device']))
-    logger.info("Compile Time taken: {:.2f}s".format(time.time() - compile_start_time))
+    _ = model(dense.to(device), sparse.to(device))
+    logger.info(
+        "Compile Time taken: {:.2f}s".format(time.time() - compile_start_time))
 
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
@@ -92,7 +116,8 @@ def main():
 
     start_time_all = time.time()
 
-    writer = SummaryWriter(log_dir=hyperparameters["tensorboard_dir"], flush_secs=30)
+    writer = SummaryWriter(log_dir=hyperparameters["tensorboard_dir"],
+                           flush_secs=30)
 
     prof = torch.profiler.profile(
         activities=[
@@ -115,7 +140,8 @@ def main():
             repeat=1),
         # on_trace_ready=partial(trace_handler,
         #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"]),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            hyperparameters["tensorboard_dir"]),
         record_shapes=True,
         profile_memory=True,
         with_stack=True
@@ -132,11 +158,12 @@ def main():
         correct_predictions = 0
         total_predictions = 0
         model.train()
-        for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']), ncols=80):
+        for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']),
+                              ncols=80):
             labels, dense, sparse = next(train_loader)
-            labels = labels.to(hyperparameters['device'])
-            dense = dense.to(hyperparameters['device'])
-            sparse = sparse.to(hyperparameters['device'])
+            labels = labels.to(device)
+            dense = dense.to(device)
+            sparse = sparse.to(device)
 
             # Forward pass
             outputs = model(dense, sparse)
@@ -160,9 +187,11 @@ def main():
             # Update total and correct predictions
             total_predictions += labels.size(0)
             correct_predictions += (predicted == labels).sum().item()
-            index = (epoch * hyperparameters['batches_per_epoch'] + batch_idx) * batch_size_train
+            index = (epoch * hyperparameters[
+                'batches_per_epoch'] + batch_idx) * batch_size_train
             writer.add_scalar("Loss/train", train_loss, index)
-            writer.add_scalar("Accuracy/train", correct_predictions / total_predictions,
+            writer.add_scalar("Accuracy/train",
+                              correct_predictions / total_predictions,
                               index)
             for name, t in timing_context.items():
                 writer.add_scalar(f"TrainingTime/{name}", t, index)
@@ -177,12 +206,13 @@ def main():
             total_predictions = 0
             correct_predictions = 0
             valid_loss = 0.0
-            for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']), ncols=80):
+            for batch_idx in tqdm(range(hyperparameters['batches_per_epoch']),
+                                  ncols=80):
                 labels, dense, sparse = next(valid_loader)
                 # Move data to the appropriate device
-                labels = labels.to(hyperparameters['device'])
-                dense = dense.to(hyperparameters['device'])
-                sparse = sparse.to(hyperparameters['device'])
+                labels = labels.to(device)
+                dense = dense.to(device)
+                sparse = sparse.to(device)
 
                 # Forward pass
                 outputs = model(dense, sparse)
@@ -196,7 +226,8 @@ def main():
                 total_predictions += labels.size(0)
                 correct_predictions += (predicted == labels).sum().item()
                 valid_accuracy = correct_predictions / total_predictions
-                index = (epoch * hyperparameters['batches_per_epoch'] + batch_idx) * batch_size_valid
+                index = (epoch * hyperparameters[
+                    'batches_per_epoch'] + batch_idx) * batch_size_valid
                 writer.add_scalar("Loss/valid",
                                   valid_loss,
                                   index)
@@ -208,7 +239,8 @@ def main():
                                       index)
                 prof.step()
 
-        logger.info("Validation Time taken: {:.2f}s".format(time.time() - start))
+        logger.info(
+            "Validation Time taken: {:.2f}s".format(time.time() - start))
         logger.info("----------------------------------------------")
         logger.info(f'Epoch [{epoch + 1}/{num_epochs}], '
                     f'Train Loss: {train_loss:.4f}, '
@@ -224,7 +256,8 @@ def main():
     prof.stop()
     writer.flush()
 
-    logger.info("Total Time taken: {:.2f}s".format(time.time() - start_time_all))
+    logger.info(
+        "Total Time taken: {:.2f}s".format(time.time() - start_time_all))
 
 
 if __name__ == '__main__':
