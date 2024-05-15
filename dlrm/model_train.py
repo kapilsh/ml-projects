@@ -3,6 +3,7 @@ import uuid
 from functools import partial
 from sys import platform
 
+import click
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -34,13 +35,17 @@ def timer_end(context, module, *args, **kwargs):
     context[module.__class__.__name__] = (time.time() - context[
         module.__class__.__name__]) * 1000000
 
-
-def main():
+@click.command()
+@click.option('--config', default="model_hyperparameters.json", help='Model parameters filename')
+@click.option('--use_torch_compile', is_flag=True, default=False, help='Use torch.compile if set')
+def main(config: str, use_torch_compile: bool):
     # Load hyperparameters
-    with open('model_hyperparameters.json', 'r') as f:
+    with open(config, 'r') as f:
         hyperparameters = json.load(f)
 
     timing_context = {}
+
+    modifier = config.replace(".", "").replace("/", "").replace("json", "")
 
     logger.info("Hyperparameters: {}".format(hyperparameters))
 
@@ -61,18 +66,18 @@ def main():
         valid_dirs = [d.replace("/mnt/metaverse-nas", "/Volumes/nas-drive") for
                       d in valid_dirs]
 
-    train_dataset = CriteoParquetDataset(
-        path=train_dirs)
-    valid_dataset = CriteoParquetDataset(
-        path=valid_dirs)
+    train_dataset = CriteoParquetDataset(path=train_dirs)
+    valid_dataset = CriteoParquetDataset(path=valid_dirs)
 
     logger.info("Loaded datasets")
 
     model_parameters = ModelParameters(
         dense_input_feature_size=hyperparameters['dense_input_feature_size'],
+        sparse_input_feature_size=hyperparameters['sparse_input_feature_size'],
         sparse_embedding_sizes=hyperparameters['sparse_embedding_sizes'],
         dense_mlp=hyperparameters['dense_mlp'],
         prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
+        interaction_type=hyperparameters['dense_sparse_interaction_type'],
         use_modulus_hash=hyperparameters['use_modulus_hash'],
     )
 
@@ -81,9 +86,11 @@ def main():
     dlrm = DLRM(metadata=metadata, parameters=model_parameters,
                 device=device).to(device)
 
-    model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
+    if use_torch_compile:
+        model = torch.compile(dlrm, fullgraph=True, mode="max-autotune")
+    else:
+        model = dlrm
 
-    # model = dlrm
     optimizer = torch.optim.Adam(model.parameters(),
                                  lr=hyperparameters['learning_rate'])
 
@@ -101,11 +108,14 @@ def main():
     valid_loader = iter(
         DataLoader(valid_dataset, batch_size=batch_size_valid, shuffle=False))
 
-    _, dense, sparse = next(train_loader)
-    compile_start_time = time.time()
-    _ = model(dense.to(device), sparse.to(device))
-    logger.info(
-        "Compile Time taken: {:.2f}s".format(time.time() - compile_start_time))
+    labels, dense, sparse = next(train_loader)
+    # compile_start_time = time.time()
+    # outputs = model(dense.to(device), sparse.to(device))
+    # loss = criterion(outputs, labels.to(device))
+    # optimizer.zero_grad()
+    # loss.backward()
+    # logger.info(
+    #     "Compile Time taken: {:.2f}s".format(time.time() - compile_start_time))
 
     # Number of epochs
     num_epochs = hyperparameters['num_epochs']
@@ -117,7 +127,8 @@ def main():
     start_time_all = time.time()
 
     writer = SummaryWriter(log_dir=hyperparameters["tensorboard_dir"],
-                           flush_secs=30)
+                           flush_secs=30,
+                           filename_suffix=modifier)
 
     prof = torch.profiler.profile(
         activities=[
@@ -138,11 +149,9 @@ def main():
             warmup=1,
             active=3,
             repeat=1),
-        # on_trace_ready=partial(trace_handler,
-        #                        results_dir="/home/ksharma/dev/git/ml-projects/dlrm/profiler_logs"),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(
-            hyperparameters["tensorboard_dir"]),
-        record_shapes=True,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(hyperparameters["tensorboard_dir"],
+                                                                worker_name=modifier),
+        # record_shapes=True,
         profile_memory=True,
         with_stack=True
         # used when outputting for tensorboard
@@ -165,14 +174,14 @@ def main():
             dense = dense.to(device)
             sparse = sparse.to(device)
 
-            # Forward pass
-            outputs = model(dense, sparse)
-            loss = criterion(outputs, labels)
-
-            # logger.info("--- Loss: {}".format(loss.item()))
-
             # Backward pass and optimization
             optimizer.zero_grad()
+
+            # Forward pass
+            outputs = model(dense, sparse)
+
+            loss = criterion(outputs, labels)
+
             # logger.info("Zeroed gradients")
             loss.backward()
             # logger.info("Backward pass done")
@@ -183,7 +192,8 @@ def main():
             train_loss = train_loss + (
                     (loss.item() - train_loss) / (batch_idx + 1))
             # Convert outputs probabilities to predicted class (0 or 1)
-            predicted = torch.sigmoid(outputs).data > 0.5
+            predicted = (outputs > 0.5).float()
+            print(predicted, labels)
             # Update total and correct predictions
             total_predictions += labels.size(0)
             correct_predictions += (predicted == labels).sum().item()
@@ -221,7 +231,7 @@ def main():
                         (loss.item() - valid_loss) / (batch_idx + 1))
 
                 # Convert outputs probabilities to predicted class (0 or 1)
-                predicted = torch.sigmoid(outputs).data > 0.5
+                predicted = (outputs > 0.5).float()
                 # Update total and correct predictions
                 total_predictions += labels.size(0)
                 correct_predictions += (predicted == labels).sum().item()

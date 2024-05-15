@@ -9,8 +9,9 @@
   },
   "metadata_path": "/mnt/metaverse-nas/criteo_metadata.json",
   "model_path": "/mnt/metaverse-nas/criteo_model.pt",
-  "tensorboard_dir": "for_talk_tb_logs",
+  "tensorboard_dir": "tb_logs",
   "dense_input_feature_size": 13,
+  "sparse_input_feature_size": 26,
   "sparse_embedding_sizes": {
     "SPARSE_0": 16,
     "SPARSE_1": 16,
@@ -41,24 +42,17 @@
   },
   "dense_mlp": {
     "hidden_layer_sizes": [
-      512,
-      256,
-      64
+      512, 256, 64
     ],
     "output_size": 16
   },
-  "sparse_mlp": {
-    "hidden_layer_sizes": [
-      16
-    ],
-    "output_size": 32
-  },
+  "dense_sparse_interaction_type": "dot",
   "prediction_hidden_sizes": [
     512,
     256
   ],
-  "num_epochs": 10,
-  "learning_rate": 0.1,
+  "num_epochs": 10000,
+  "learning_rate": 0.001,
   "device": "cuda",
   "batch_size": {
     "train": 128,

@@ -26,7 +26,7 @@ class MLP(nn.Module):
             else:
                 fc_layers.append(nn.Linear(hidden_sizes[i - 1], hidden_size))
             fc_layers.append(nn.ReLU())
-        fc_layers.append(nn.Linear(hidden_sizes[-1], output_size))
+        fc_layers.append(nn.Linear(hidden_sizes[-1] if hidden_sizes else input_size, output_size))
         self.fc_layers = nn.Sequential(*fc_layers)
 
     def forward(self, x: torch.Tensor):
@@ -35,18 +35,27 @@ class MLP(nn.Module):
 
 class DenseArch(nn.Module):
     def __init__(self,
+                 metadata: Dict[str, Union[int, List[int], Dict[str, int], float]],
                  dense_feature_count: int,
                  dense_hidden_layers_sizes: List[int],
                  output_size: int,
+                 device: str = "cpu",
                  *args, **kwargs) -> None:
         super(DenseArch, self).__init__(*args, **kwargs)
         self.mlp = MLP(input_size=dense_feature_count,
                        hidden_sizes=dense_hidden_layers_sizes,
                        output_size=output_size)  # D X O
+        self.mean_vector = torch.tensor([metadata[f"DENSE_{i}"]["mean"] for i in range(dense_feature_count)],
+                                        device=device)
+        self.std_vector = torch.tensor([metadata[f"DENSE_{i}"]["std"] for i in range(dense_feature_count)],
+                                       device=device)
+
+    def _normalize_inputs(self, inputs: torch.Tensor) -> torch.Tensor:
+        return (inputs - self.mean_vector) / self.std_vector
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         # Input : B X D # Output : B X O
-        return self.mlp(inputs)
+        return self.mlp(self._normalize_inputs(inputs))
 
 
 class SparseFeatureLayer(nn.Module):
@@ -63,17 +72,18 @@ class SparseFeatureLayer(nn.Module):
 class SparseArch(nn.Module):
     def __init__(self,
                  metadata: Dict[str, Union[int, List[int], Dict[str, int]]],
+                 sparse_feature_count: int,
                  embedding_sizes: Mapping[str, int],
                  device: str = "cpu",
                  *args, **kwargs) -> None:
         super(SparseArch, self).__init__(*args, **kwargs)
-        self.num_sparse_features = len(metadata)
-        self._modulus_hash_sizes = [m["cardinality"] for m in metadata.values()]
+        self.num_sparse_features = sparse_feature_count
+        self._modulus_hash_sizes = [metadata[f"SPARSE_{i}"]["cardinality"] for i in
+                                    range(self.num_sparse_features)]
         self.sparse_layers = nn.ModuleList([
             SparseFeatureLayer(cardinality=self._modulus_hash_sizes[i],
-                               embedding_size=embedding_sizes[feature_name]) for
-            i, feature_name in
-            enumerate(metadata.keys())
+                               embedding_size=embedding_sizes[f"SPARSE_{i}"]) for
+            i in range(self.num_sparse_features)
         ])
         self.total_embedding_size = sum(embedding_sizes.values())
         self.mapping = [
@@ -87,8 +97,7 @@ class SparseArch(nn.Module):
     def index_hash(tensor: torch.Tensor,
                    tokenizer_values: Union[List[int], torch.Tensor]):
         tensor = tensor.view(-1, 1)
-        tokenizers = tokenizer_values.view(1, -1)
-        matches = tensor == tokenizers
+        matches = tensor == tokenizer_values.view(1, -1)
         indices = torch.argmax(matches.to(torch.int64), dim=1)
         return indices
 
@@ -104,21 +113,11 @@ class SparseArch(nn.Module):
             output_values.append(sparse_out)
         return output_values
 
-    def _forward_modulus_hash(self, inputs: torch.Tensor) -> torch.Tensor:
+    def _forward_modulus_hash(self, inputs: torch.Tensor) -> List[torch.Tensor]:
         sparse_hashed = self.modulus_hash(inputs, self.cardinality_tensor)
-        output = torch.empty((inputs.size()[0],
-                              self.total_embedding_size), device=inputs.device)
-        start_index = 0
-        for i in range(self.num_sparse_features):
-            output[:, start_index: (start_index + self.sparse_layers[
-                i].embedding.embedding_dim)] = self.sparse_layers[i](
-                sparse_hashed[:, i])
-        return output
+        return [sparse_layer(sparse_hashed[:, i]) for i, sparse_layer in enumerate(self.sparse_layers)]
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        # slide 1:
-        # return self._forward_index_hash(inputs)
-        # # slide 2:
+    def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
         return self._forward_modulus_hash(inputs)
 
 
@@ -134,9 +133,10 @@ class DenseSparseInteractionLayer(nn.Module):
         self.interaction_type = interaction_type
 
     def forward(self, dense_out: torch.Tensor,
-                sparse_out: torch.Tensor) -> Tensor:
-        concat = torch.cat([dense_out, sparse_out], dim=-1).unsqueeze(2)
+                sparse_out: List[torch.Tensor]) -> Tensor:
+        concat = torch.cat([dense_out] + sparse_out, dim=-1)
         if self.interaction_type == "dot":
+            concat = concat.unsqueeze(2)
             out = torch.bmm(concat, torch.transpose(concat, 1, 2))
         else:
             out = concat
@@ -148,10 +148,12 @@ class PredictionLayer(nn.Module):
     def __init__(self,
                  dense_out_size: int,
                  sparse_out_sizes: List[int],
+                 interaction_type: str,
                  hidden_sizes: List[int], *wargs, **kwargs):
         super(PredictionLayer, self).__init__(*wargs, **kwargs)
         concat_size = sum(sparse_out_sizes) + dense_out_size
-        self.mlp = MLP(input_size=concat_size * concat_size,
+        input_size = concat_size * concat_size if interaction_type == "dot" else concat_size
+        self.mlp = MLP(input_size=input_size,
                        hidden_sizes=hidden_sizes, output_size=1)
         self.sigmoid = nn.Sigmoid()
 
@@ -164,9 +166,11 @@ class PredictionLayer(nn.Module):
 @dataclass
 class Parameters:
     dense_input_feature_size: int
+    sparse_input_feature_size: int
     sparse_embedding_sizes: Mapping[str, int]
     dense_mlp: Dict[str, Union[List[int], int]]
     prediction_hidden_sizes: List[int]
+    interaction_type: str
     use_modulus_hash: bool = False
 
 
@@ -176,21 +180,25 @@ class DLRM(nn.Module):
                  device: str = "cpu"):
         super(DLRM, self).__init__()
         self.dense_layer = DenseArch(
+            metadata=metadata,
             dense_feature_count=parameters.dense_input_feature_size,
             dense_hidden_layers_sizes=parameters.dense_mlp[
                 "hidden_layer_sizes"],
-            output_size=parameters.dense_mlp["output_size"])
+            output_size=parameters.dense_mlp["output_size"],
+            device=device)
         self.sparse_layer = SparseArch(
             metadata=metadata,
+            sparse_feature_count=parameters.sparse_input_feature_size,
             embedding_sizes=parameters.sparse_embedding_sizes,
             device=device
         )
-        self.interaction_layer = DenseSparseInteractionLayer()
+        self.interaction_layer = DenseSparseInteractionLayer(interaction_type=parameters.interaction_type)
         self.prediction_layer = PredictionLayer(
             dense_out_size=parameters.dense_mlp["output_size"],
             sparse_out_sizes=[parameters.sparse_embedding_sizes[f"SPARSE_{i}"]
                               for i in
                               range(len(parameters.sparse_embedding_sizes))],
+            interaction_type=parameters.interaction_type,
             hidden_sizes=parameters.prediction_hidden_sizes,
         )
 
@@ -223,7 +231,9 @@ def dry_run_with_data(file_path, metadata_path):
     logger.info("Reading the metadata file {}...".format(metadata_path))
 
     dataset = CriteoParquetDataset(file_path=file_path)
-    data_loader = DataLoader(dataset, batch_size=32, shuffle=False)
+    data_loader = DataLoader(dataset, batch_size=128, shuffle=False)
+    metadata = read_metadata(metadata_path)
+
     labels, dense, sparse = next(iter(data_loader))
     logger.info("Labels size: {}".format(labels.size()))
     logger.info("Dense size: {}".format(dense.size()))
@@ -231,24 +241,24 @@ def dry_run_with_data(file_path, metadata_path):
 
     dense_mlp_out_size = 16
     num_dense_features = dense.size()[1]
-    dense_arch = DenseArch(dense_feature_count=num_dense_features,
+    dense_arch = DenseArch(metadata=metadata,
+                           dense_feature_count=num_dense_features,
                            dense_hidden_layers_sizes=[32],
-                           output_size=dense_mlp_out_size)
+                           output_size=dense_mlp_out_size, )
     # dense_arch_optim = torch.compile(dense_arch)
     dense_out = dense_arch(dense)
     logger.info("Dense out size: {}".format(dense_out.size()))
 
-    metadata = read_metadata(metadata_path)
     embedding_size = 16
     embedding_sizes = {fn: embedding_size for fn in metadata.keys()}
     sparse_mlp_out_size = 16
     sparse_arch = SparseArch(metadata=metadata,
+                             sparse_feature_count=sparse.size()[1],
                              embedding_sizes=embedding_sizes)
-    import ipdb; ipdb.set_trace()
     # compiled model hangs on running with inputs
     # sparse_arch_optim = torch.compile(sparse_arch)
     sparse_out = sparse_arch(sparse)
-    logger.info("Sparse out size: {}".format(sparse_out.size()))
+    logger.info("Sparse out size: {}".format(sparse_out[0].size()))
 
     dense_sparse_interaction_layer = DenseSparseInteractionLayer()
     # dense_sparse_interaction_layer_optim = torch.compile(dense_sparse_interaction_layer)
@@ -256,9 +266,7 @@ def dry_run_with_data(file_path, metadata_path):
     logger.info("Dense sparse interaction out size: {}".format(ds_out.size()))
 
     prediction_layer = PredictionLayer(dense_out_size=dense_mlp_out_size,
-                                       sparse_out_sizes=[
-                                                            sparse_mlp_out_size] * len(
-                                           metadata),
+                                       sparse_out_sizes=[sparse_mlp_out_size] * len(sparse_out),
                                        hidden_sizes=[16])
     # prediction_layer_optim = torch.compile(prediction_layer)
     pred_out = prediction_layer(ds_out)
@@ -266,18 +274,16 @@ def dry_run_with_data(file_path, metadata_path):
     logger.info("Prediction out value: {}".format(pred_out))
 
     # TODO dry run the DLRM model
+    with open("model_hyperparameters.json", 'r') as f:
+        hyperparameters = json.load(f)
     parameters = Parameters(
-        dense_input_feature_size=13,
-        sparse_embedding_sizes={
-            "SPARSE_{}".format(i): 16 for i in range(26)
-        },
-        dense_mlp={
-            "hidden_layer_sizes": [16],
-            "output_size": 16
-        },
-        prediction_hidden_sizes=[16],
-        use_modulus_hash=True
-
+        dense_input_feature_size=hyperparameters['dense_input_feature_size'],
+        sparse_input_feature_size=hyperparameters['sparse_input_feature_size'],
+        sparse_embedding_sizes=hyperparameters['sparse_embedding_sizes'],
+        dense_mlp=hyperparameters['dense_mlp'],
+        prediction_hidden_sizes=hyperparameters['prediction_hidden_sizes'],
+        interaction_type=hyperparameters['dense_sparse_interaction_type'],
+        use_modulus_hash=hyperparameters['use_modulus_hash'],
     )
     import torch._dynamo
     torch._dynamo.reset()
@@ -286,15 +292,13 @@ def dry_run_with_data(file_path, metadata_path):
     _ = dlrm(dense, sparse)
 
     # dlrm_optim = torch.compile(dlrm, backend="aot_eager")
-    dlrm_optim = torch.compile(dlrm, backend="inductor", fullgraph=True)
+    dlrm_optim = torch.compile(dlrm, backend="inductor", fullgraph=True, mode="max-autotune")
     # logger.info("Compiled DLRM model: {}".format(dlrm))
     start = time.time()
     prediction = dlrm_optim(dense, sparse)
     logger.info("DLRM prediction size: {}".format(prediction.size()))
     logger.info(
         "[COMPILED] Time taken for prediction: {}".format(time.time() - start))
-
-    torch.onnx.export(dlrm, (dense, sparse), './data/dlrm.onnx')
 
 
 if __name__ == "__main__":

@@ -11,10 +11,17 @@ def calculate_cardinality_and_tokenizer_values(column):
     return cardinality, tokenizer_values
 
 
+def calculate_mean_and_std(column):
+    mean = float(column.mean())
+    std = float(column.std())
+    return mean, std
+
+
 @click.command()
 @click.option('--file_path',
               type=click.Path(exists=True),
-              help='Path to the parquet file')
+              help='Path to the parquet file',
+              required=True)
 @click.option('--output_path',
               type=click.Path(),
               default='output.json',
@@ -33,6 +40,13 @@ def process_file(file_path, output_path):
             results[column_name] = {
                 'cardinality': cardinality,
                 'tokenizer_values': tokenizer_values
+            }
+        elif column_name.startswith("DENSE"):
+            logger.info("Processing column: {}".format(column_name))
+            mean, std = calculate_mean_and_std(df[column_name])
+            results[column_name] = {
+                'mean': mean,
+                'std': std
             }
     with open(output_path, 'w') as f:
         logger.info("Writing results to {}".format(output_path))
