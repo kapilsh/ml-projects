@@ -94,11 +94,12 @@ def main(config: str, use_torch_compile: bool):
     optimizer = torch.optim.Adam(model.parameters(),
                                  lr=hyperparameters['learning_rate'])
 
-    # Binary Cross Entropy loss
-    criterion = nn.BCELoss()
-
     batch_size_train = hyperparameters['batch_size']['train']
     batch_size_valid = hyperparameters['batch_size']['validation']
+
+    # Binary Cross Entropy loss
+    bce_positive_weight = (torch.ones(batch_size_train) /metadata['labels']['mean']).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=bce_positive_weight)
 
     logger.info("Getting data loaders")
 
@@ -192,8 +193,7 @@ def main(config: str, use_torch_compile: bool):
             train_loss = train_loss + (
                     (loss.item() - train_loss) / (batch_idx + 1))
             # Convert outputs probabilities to predicted class (0 or 1)
-            predicted = (outputs > 0.5).float()
-            print(predicted, labels)
+            predicted = (torch.sigmoid(outputs) > 0.5).float()
             # Update total and correct predictions
             total_predictions += labels.size(0)
             correct_predictions += (predicted == labels).sum().item()
@@ -231,7 +231,7 @@ def main(config: str, use_torch_compile: bool):
                         (loss.item() - valid_loss) / (batch_idx + 1))
 
                 # Convert outputs probabilities to predicted class (0 or 1)
-                predicted = (outputs > 0.5).float()
+                predicted = (torch.sigmoid(outputs) > 0.5).float()
                 # Update total and correct predictions
                 total_predictions += labels.size(0)
                 correct_predictions += (predicted == labels).sum().item()

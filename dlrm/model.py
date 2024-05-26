@@ -51,7 +51,8 @@ class DenseArch(nn.Module):
                                        device=device)
 
     def _normalize_inputs(self, inputs: torch.Tensor) -> torch.Tensor:
-        return (inputs - self.mean_vector) / self.std_vector
+        return inputs
+        # return (inputs - self.mean_vector) / self.std_vector
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         # Input : B X D # Output : B X O
@@ -124,24 +125,31 @@ class SparseArch(nn.Module):
 class DenseSparseInteractionLayer(nn.Module):
     SUPPORTED_INTERACTION_TYPES = ["dot", "cat"]
 
-    def __init__(self, interaction_type: str = "dot"):
+    def __init__(self, dense_out_size, sparse_out_size, interaction_type: str = "dot"):
         super(DenseSparseInteractionLayer, self).__init__()
         if interaction_type not in self.SUPPORTED_INTERACTION_TYPES:
             raise ValueError(
                 f"Interaction type {interaction_type} not supported. "
                 f"Supported types are {self.SUPPORTED_INTERACTION_TYPES}")
         self.interaction_type = interaction_type
+        feature_dim = dense_out_size + sparse_out_size
+        self.output_size = feature_dim * (feature_dim + 1) // 2
+        self.r_out, self.c_out = torch.triu_indices(feature_dim, feature_dim).to(device="cuda")
+
 
     def forward(self, dense_out: torch.Tensor,
                 sparse_out: List[torch.Tensor]) -> Tensor:
         concat = torch.cat([dense_out] + sparse_out, dim=-1)
+
         if self.interaction_type == "dot":
             concat = concat.unsqueeze(2)
-            out = torch.bmm(concat, torch.transpose(concat, 1, 2))
+            dot_product = torch.matmul(concat, torch.transpose(concat, 1, 2))
+            out = dot_product[:, self.r_out, self.c_out].view(-1, self.output_size)
+            out = torch.concat([out, dense_out], dim=1)
         else:
-            out = concat
-        flattened = torch.flatten(out, 1)
-        return flattened
+            out = torch.flatten(concat, start_dim=1)
+
+        return out
 
 
 class PredictionLayer(nn.Module):
@@ -152,15 +160,13 @@ class PredictionLayer(nn.Module):
                  hidden_sizes: List[int], *wargs, **kwargs):
         super(PredictionLayer, self).__init__(*wargs, **kwargs)
         concat_size = sum(sparse_out_sizes) + dense_out_size
-        input_size = concat_size * concat_size if interaction_type == "dot" else concat_size
+        input_size = (dense_out_size + concat_size * (concat_size + 1) // 2) if interaction_type == "dot" else concat_size
         self.mlp = MLP(input_size=input_size,
                        hidden_sizes=hidden_sizes, output_size=1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        mlp_out = self.mlp(inputs)
-        result = self.sigmoid(mlp_out)
-        return result
+        return self.mlp(inputs)
 
 
 @dataclass
@@ -192,12 +198,17 @@ class DLRM(nn.Module):
             embedding_sizes=parameters.sparse_embedding_sizes,
             device=device
         )
-        self.interaction_layer = DenseSparseInteractionLayer(interaction_type=parameters.interaction_type)
+        sparse_out_sizes = [parameters.sparse_embedding_sizes[f"SPARSE_{i}"]
+                            for i in
+                            range(len(parameters.sparse_embedding_sizes))]
+        dense_out_size = parameters.dense_mlp["output_size"]
+        self.interaction_layer = DenseSparseInteractionLayer(
+            dense_out_size=dense_out_size,
+            sparse_out_size=sum(sparse_out_sizes),
+            interaction_type=parameters.interaction_type)
         self.prediction_layer = PredictionLayer(
-            dense_out_size=parameters.dense_mlp["output_size"],
-            sparse_out_sizes=[parameters.sparse_embedding_sizes[f"SPARSE_{i}"]
-                              for i in
-                              range(len(parameters.sparse_embedding_sizes))],
+            dense_out_size=dense_out_size,
+            sparse_out_sizes=sparse_out_sizes,
             interaction_type=parameters.interaction_type,
             hidden_sizes=parameters.prediction_hidden_sizes,
         )

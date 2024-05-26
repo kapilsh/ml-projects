@@ -33,6 +33,7 @@ def process_file(file_path, output_path):
     logger.info("Reading the parquet file {}...".format(file_path))
     df = pd.read_parquet(file_path)
     results = {}
+
     for column_name in df.columns:
         if column_name.startswith("SPARSE"):
             logger.info("Processing column: {}".format(column_name))
@@ -41,13 +42,14 @@ def process_file(file_path, output_path):
                 'cardinality': cardinality,
                 'tokenizer_values': tokenizer_values
             }
-        elif column_name.startswith("DENSE"):
+        elif column_name.startswith("DENSE") or column_name == "labels":
             logger.info("Processing column: {}".format(column_name))
             mean, std = calculate_mean_and_std(df[column_name])
             results[column_name] = {
                 'mean': mean,
                 'std': std
             }
+
     with open(output_path, 'w') as f:
         logger.info("Writing results to {}".format(output_path))
         json.dump(results, f)
