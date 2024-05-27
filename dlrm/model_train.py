@@ -19,6 +19,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 logger.add("train_logs/dlrm_model_train_{time}.log")
 
+# use tensor cores
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 def trace_handler(prof: profile, results_dir: str):
     logger.info("\n" + prof.key_averages().table(
