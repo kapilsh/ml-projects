@@ -27,3 +27,4 @@ class ScaledDotProductAttention(nn.Module):
         scores += self.mask
         attention = F.softmax(scores, dim=-1)
         return torch.matmul(attention, v), attention
+
