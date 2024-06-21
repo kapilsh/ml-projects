@@ -1,10 +1,4 @@
-# PositionEncoding
-# LayerNorm
-# TransformerEmbedding
-# Scaled Dot-Product Attention
-# MultiHeadAttention
 import math
-from typing import Optional
 
 import torch
 from torch import nn
