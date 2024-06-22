@@ -178,3 +178,95 @@ class Encoder(nn.Module):
     def forward(self, x: torch.Tensor):
         x = self.input_layer(x)
         return self.layers(x)
+
+
+class DecoderLayer(nn.Module):
+    def __init__(self, embedding_dimension: int, sequence_length: int,
+                 num_heads: int, hidden_dimension: int, drop_prop: float):
+        super().__init__()
+        self.masked_attention = MaskedMultiHeadAttention(
+            embedding_dimension=embedding_dimension,
+            sequence_length=sequence_length,
+            num_heads=num_heads
+        )
+        self.attention = MultiHeadAttention(
+            embedding_dimension=embedding_dimension,
+            sequence_length=sequence_length,
+            num_heads=num_heads
+        )
+        self.feed_forward = FeedForwardNetwork(
+            embedding_dimension=embedding_dimension,
+            hidden_dimension=hidden_dimension,
+            drop_prop=drop_prop
+        )
+        self.norm1 = nn.LayerNorm(embedding_dimension)
+        self.norm2 = nn.LayerNorm(embedding_dimension)
+        self.norm3 = nn.LayerNorm(embedding_dimension)
+        self.drop1 = nn.Dropout(drop_prop)
+        self.drop2 = nn.Dropout(drop_prop)
+        self.drop3 = nn.Dropout(drop_prop)
+
+    def forward(self, x: torch.Tensor, enc_output: torch.Tensor):
+        x = x + self.drop1(self.masked_attention(x, x, x))
+        x = self.norm1(x)
+        x = x + self.drop2(self.attention(x, enc_output, enc_output))
+        x = self.norm2(x)
+        x = x + self.drop3(self.feed_forward(x))
+        x = self.norm3(x)
+        return x
+
+
+class Decoder(nn.Module):
+    def __init__(self,
+                 num_layers: int,
+                 embedding_dimension: int,
+                 sequence_length: int,
+                 num_heads: int,
+                 hidden_dimension: int,
+                 drop_prop: float):
+        super().__init__()
+        self.input_layer = InputLayer(num_embeddings=sequence_length,
+                                      sequence_length=sequence_length,
+                                      embedding_dimension=embedding_dimension)
+        self.layers = nn.Sequential(*[
+            DecoderLayer(embedding_dimension=embedding_dimension,
+                         sequence_length=sequence_length,
+                         num_heads=num_heads,
+                         hidden_dimension=hidden_dimension,
+                         drop_prop=drop_prop)
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, x: torch.Tensor, enc_output: torch.Tensor):
+        x = self.input_layer(x)
+        return self.layers(x, enc_output)
+
+
+class Transformer(nn.Module):
+    def __init__(self,
+                 num_layers: int,
+                 embedding_dimension: int,
+                 sequence_length: int,
+                 num_heads: int,
+                 hidden_dimension: int,
+                 drop_prop: float):
+        super().__init__()
+        self.encoder = Encoder(num_layers=num_layers,
+                               embedding_dimension=embedding_dimension,
+                               sequence_length=sequence_length,
+                               num_heads=num_heads,
+                               hidden_dimension=hidden_dimension,
+                               drop_prop=drop_prop)
+        self.decoder = Decoder(num_layers=num_layers,
+                               embedding_dimension=embedding_dimension,
+                               sequence_length=sequence_length,
+                               num_heads=num_heads,
+                               hidden_dimension=hidden_dimension,
+                               drop_prop=drop_prop)
+        self.output_layer = nn.Linear(in_features=embedding_dimension,
+                                      out_features=sequence_length)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor):
+        enc_output = self.encoder(x)
+        dec_output = self.decoder(y, enc_output)
+        return self.output_layer(dec_output)
