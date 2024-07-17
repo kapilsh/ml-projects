@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from transformers import GPT2LMHeadModel
 
 import torch
 import torch.nn as nn
@@ -41,6 +42,35 @@ class GPT2(nn.Module):
             embeddings = layer(embeddings)
         embeddings = self.layer_norm(embeddings)
         return self.output_layer(embeddings)  # returns logits
+
+    @classmethod
+    def from_pretrained(cls):
+        model_hf = GPT2LMHeadModel.from_pretrained('gpt2')
+        config = GPT2Config()
+        model = cls(config)
+
+        model.token_embedding.from_pretrained(model_hf.transformer.wte)
+        model.positional_embedding.from_pretrained(model_hf.transformer.wpe)
+        for layer_idx in range(len(model.layers)):
+            model.layers[layer_idx].layer_norm1.weight.copy_(model_hf.transformer.h[layer_idx].ln_1.weight)
+            model.layers[layer_idx].layer_norm1.bias.copy_(model_hf.transformer.h[layer_idx].ln_1.bias)
+            model.layers[layer_idx].attention.qkv.weight.copy_(model_hf.transformer.h[layer_idx].attn.c_attn.weight)
+            model.layers[layer_idx].attention.qkv.bias.copy_(model_hf.transformer.h[layer_idx].attn.c_attn.bias)
+            model.layers[layer_idx].attention.out.weight.copy_(model_hf.transformer.h[layer_idx].attn.c_proj.weight)
+            model.layers[layer_idx].attention.out.bias.copy_(model_hf.transformer.h[layer_idx].attn.c_proj.bias)
+            model.layers[layer_idx].layer_norm2.weight.copy_(model_hf.transformer.h[layer_idx].ln_2.weight)
+            model.layers[layer_idx].layer_norm2.bias.copy_(model_hf.transformer.h[layer_idx].ln_2.bias)
+            model.layers[layer_idx].mlp.fc1.weight.copy_(model_hf.transformer.h[layer_idx].mlp.c_fc.weight)
+            model.layers[layer_idx].mlp.fc1.bias.copy_(model_hf.transformer.h[layer_idx].mlp.c_fc.bias)
+            model.layers[layer_idx].mlp.fc2.weight.copy_(model_hf.transformer.h[layer_idx].mlp.c_proj.weight)
+            model.layers[layer_idx].mlp.fc2.bias.copy_(model_hf.transformer.h[layer_idx].mlp.c_proj.bias)
+
+        model.layer_norm.weight.copy_(model_hf.transformer.ln_f.weight)
+
+
+
+
+
 
 
 class GPT2Layer(nn.Module):
