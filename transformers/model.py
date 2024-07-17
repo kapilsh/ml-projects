@@ -147,7 +147,7 @@ class EncoderLayer(nn.Module):
         self.drop2 = nn.Dropout(drop_prop)
 
     def forward(self, x: torch.Tensor):
-        x = x + self.drop1(self.attention(x))
+        x = x + self.drop1(self.attention(x, x, x)[0])
         x = self.norm1(x)
         x = x + self.drop2(self.feed_forward(x))
         x = self.norm2(x)
