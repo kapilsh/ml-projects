@@ -99,14 +99,12 @@ class GPT2Layer(nn.Module):
         self.layer_norm1 = nn.LayerNorm(config.embedding_dimension)
         self.attention = CausalMultiHeadAttention(config)
         self.layer_norm2 = nn.LayerNorm(config.embedding_dimension)
-        self.residual_dropout = nn.Dropout(config.dropout_residual)
         self.mlp = MLP(config)
         self.dropout_mlp = nn.Dropout(config.dropout_residual)
 
     def forward(self, embeddings: torch.Tensor):
         attention_output = embeddings + self.attention(
             self.layer_norm1(embeddings))
-        attention_output = self.residual_dropout(attention_output)
         mlp_output = attention_output + self.mlp(
             self.layer_norm2(attention_output))
         return mlp_output
@@ -137,26 +135,25 @@ class CausalMultiHeadAttention(nn.Module):
         self.qkv = nn.Linear(self.embedding_dimension,
                              3 * self.embedding_dimension)
         self.out = nn.Linear(self.embedding_dimension, self.embedding_dimension)
-        self.prob_dropout = config.dropout_attention
+        self.attention_dropout_p = config.dropout_attention
+        self.residual_dropout = nn.Dropout(config.dropout_residual)
 
     def forward(self, x: torch.Tensor):
         batch_size, sequence_length, _ = x.size()
         qkv = self.qkv(x)
         q, k, v = qkv.split(self.embedding_dimension,
                             dim=2)  # split along the third dimension
-
         k = k.view(batch_size, sequence_length, self.num_heads,
                    self.head_dim).permute(0, 2, 1, 3)
         v = v.view(batch_size, sequence_length, self.num_heads,
                    self.head_dim).permute(0, 2, 1, 3)
         q = q.view(batch_size, sequence_length, self.num_heads,
                    self.head_dim).permute(0, 2, 1, 3)
-
         weights = F.scaled_dot_product_attention(
             q, k, v, is_causal=True,
-            dropout_p=self.prob_dropout if self.training else 0)
-
+            dropout_p=self.attention_dropout_p if self.training else 0.0)
         output = weights.transpose(1, 2).contiguous().view(
             batch_size, sequence_length, self.embedding_dimension)
         output = self.out(output)
+        output = self.residual_dropout(output)
         return output
