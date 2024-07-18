@@ -23,3 +23,13 @@ embeddings/__pycache__/
 dlrm/kernels/third-party/
 dlrm/kernels/cmake-build-debug/
 
+/transformers/models/
+/transformers/.ipynb_checkpoints/
+/transformers/__pycache__/
+
+pytorch_cpp/libtorch-macos-latest.zip
+pytorch_cpp/third-party
+
+dlrm/.DS_Store
+.DS_Store
+
