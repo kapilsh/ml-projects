@@ -100,7 +100,6 @@ class GPT2Layer(nn.Module):
         self.attention = CausalMultiHeadAttention(config)
         self.layer_norm2 = nn.LayerNorm(config.embedding_dimension)
         self.mlp = MLP(config)
-        self.dropout_mlp = nn.Dropout(config.dropout_residual)
 
     def forward(self, embeddings: torch.Tensor):
         attention_output = embeddings + self.attention(
@@ -115,6 +114,8 @@ class MLP(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(config.embedding_dimension,
                              4 * config.embedding_dimension)
+        # the approximated gelu is only needed to match the outputs
+        # perfectly with the huggingface model
         self.activation = nn.GELU(approximate="tanh")
         self.fc2 = nn.Linear(4 * config.embedding_dimension,
                              config.embedding_dimension)
