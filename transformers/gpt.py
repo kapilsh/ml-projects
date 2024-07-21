@@ -158,3 +158,20 @@ class CausalMultiHeadAttention(nn.Module):
         output = self.out(output)
         output = self.residual_dropout(output)
         return output
+
+
+if __name__ == '__main__':
+    model = GPT2.from_pretrained()
+    model.train()
+
+    input_ids = torch.randint(0, 50257, (1, 10))
+
+    if torch.cuda.is_available():
+        model = model.cuda()
+        input_ids = input_ids.cuda()
+
+    compiled_model = torch.compile(model, backend="inductor", fullgraph=True,
+                                   mode="max-autotune")
+
+    logits = model(input_ids)
+    print(logits)
