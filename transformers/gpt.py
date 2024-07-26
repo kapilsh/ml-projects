@@ -50,11 +50,11 @@ class GPT2(nn.Module):
         return self.output_layer(embeddings)  # returns logits
 
     @classmethod
-    def from_pretrained(cls) -> 'GPT2':
+    def from_pretrained(cls, device="cpu") -> 'GPT2':
         model_hf = GPT2LMHeadModel.from_pretrained(
-            'gpt2', resume_download=None)
+            'gpt2', resume_download=None).to(device)
         config = GPT2Config()
-        model = cls(config)
+        model = cls(config, device=device)
         with torch.no_grad():
             model.token_embedding.weight.copy_(model_hf.transformer.wte.weight)
             model.positional_embedding.weight.copy_(
@@ -161,7 +161,7 @@ class CausalMultiHeadAttention(nn.Module):
 
 
 if __name__ == '__main__':
-    model = GPT2.from_pretrained()
+    model = GPT2.from_pretrained(device="cuda" if torch.cuda.is_available() else "cpu")
     model.train()
 
     input_ids = torch.randint(0, 50257, (1, 10))
@@ -173,5 +173,5 @@ if __name__ == '__main__':
     compiled_model = torch.compile(model, backend="inductor", fullgraph=True,
                                    mode="max-autotune")
 
-    logits = model(input_ids)
+    logits = compiled_model(input_ids)
     print(logits)
