@@ -21,15 +21,15 @@ class GPT2Config:
 
 
 class GPT2(nn.Module):
-    def __init__(self, config: GPT2Config, device: str = 'cpu'):
+    def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size,
                                             config.embedding_dimension)
         self.positional_embedding = nn.Embedding(config.context_window_size,
                                                  config.embedding_dimension)
-        self.positional_ids = torch.arange(
-            config.context_window_size).unsqueeze(0).to(device)
+        positional_ids = torch.arange(config.context_window_size).unsqueeze(0)
+        self.register_buffer('positional_ids', positional_ids)
         self.embedding_dropout = nn.Dropout(config.dropout_embeddings)
         self.layers = nn.ModuleList(
             [GPT2Layer(config) for _ in range(config.num_layers)])
@@ -50,11 +50,10 @@ class GPT2(nn.Module):
         return self.output_layer(embeddings)  # returns logits
 
     @classmethod
-    def from_pretrained(cls, device="cpu") -> 'GPT2':
-        model_hf = GPT2LMHeadModel.from_pretrained(
-            'gpt2', resume_download=None).to(device)
+    def from_pretrained(cls) -> 'GPT2':
+        model_hf = GPT2LMHeadModel.from_pretrained('gpt2', resume_download=None)
         config = GPT2Config()
-        model = cls(config, device=device)
+        model = cls(config)
         with torch.no_grad():
             model.token_embedding.weight.copy_(model_hf.transformer.wte.weight)
             model.positional_embedding.weight.copy_(
