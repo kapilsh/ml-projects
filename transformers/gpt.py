@@ -21,15 +21,15 @@ class GPT2Config:
 
 
 class GPT2(nn.Module):
-    def __init__(self, config: GPT2Config, device: str = 'cpu'):
+    def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
         self.token_embedding = nn.Embedding(config.vocab_size,
                                             config.embedding_dimension)
         self.positional_embedding = nn.Embedding(config.context_window_size,
                                                  config.embedding_dimension)
-        self.positional_ids = torch.arange(
-            config.context_window_size).unsqueeze(0).to(device)
+        positional_ids = torch.arange(config.context_window_size).unsqueeze(0)
+        self.register_buffer('positional_ids', positional_ids)
         self.embedding_dropout = nn.Dropout(config.dropout_embeddings)
         self.layers = nn.ModuleList(
             [GPT2Layer(config) for _ in range(config.num_layers)])
@@ -51,8 +51,7 @@ class GPT2(nn.Module):
 
     @classmethod
     def from_pretrained(cls) -> 'GPT2':
-        model_hf = GPT2LMHeadModel.from_pretrained(
-            'gpt2', resume_download=None)
+        model_hf = GPT2LMHeadModel.from_pretrained('gpt2', resume_download=None)
         config = GPT2Config()
         model = cls(config)
         with torch.no_grad():
@@ -158,3 +157,20 @@ class CausalMultiHeadAttention(nn.Module):
         output = self.out(output)
         output = self.residual_dropout(output)
         return output
+
+
+if __name__ == '__main__':
+    model = GPT2.from_pretrained(device="cuda" if torch.cuda.is_available() else "cpu")
+    model.train()
+
+    input_ids = torch.randint(0, 50257, (1, 10))
+
+    if torch.cuda.is_available():
+        model = model.cuda()
+        input_ids = input_ids.cuda()
+
+    compiled_model = torch.compile(model, backend="inductor", fullgraph=True,
+                                   mode="max-autotune")
+
+    logits = compiled_model(input_ids)
+    print(logits)
