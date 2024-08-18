@@ -37,3 +37,6 @@ dlrm/.DS_Store
 /rec_sys/data/.ipynb_checkpoints/
 /rec_sys/data/ml-1m/.ipynb_checkpoints/
 /rec_sys/data/ref_post_medium.pdf
+.virtual_documents/
+.vscode/
+rec_sys/__pycache__/
