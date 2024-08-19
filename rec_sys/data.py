@@ -1,5 +1,3 @@
-
-
 from torch.utils.data import Dataset, DataLoader
 from loguru import logger
 import pandas as pd
@@ -8,6 +6,7 @@ from typing import List, Dict
 import torch
 
 from dataclasses import dataclass
+
 
 @dataclass
 class MovieLensMetadata:
@@ -27,18 +26,20 @@ class MovieLensSequenceData:
     length: int
 
 
-EOS_TOKEN = -1 # end of sequence token
-EOS_RATING = 2 # end of sequence rating (average rating)
+EOS_TOKEN = -1  # end of sequence token
+EOS_RATING = 2  # end of sequence rating (average rating)
+
 
 class MovieLensSequenceDataset(Dataset):
 
-
-    def __init__(self, movies_file, users_file, ratings_file, sequence_length, window_size=1):
+    def __init__(
+        self, movies_file, users_file, ratings_file, sequence_length, window_size=1
+    ):
         users, movies, ratings = self._read_data(movies_file, users_file, ratings_file)
         self.metadata = self._generate_metadata(users, movies)
         users, movies, ratings = self._add_tokens(users, movies, ratings)
         self.data = self._generate_sequences(ratings, sequence_length, window_size)
-    
+
     def _read_data(self, movies_file, users_file, ratings_file):
         logger.info("Reading data from files")
         users = pd.read_csv(
@@ -47,7 +48,13 @@ class MovieLensSequenceDataset(Dataset):
             names=["user_id", "sex", "age_group", "occupation", "zip_code"],
             encoding="ISO-8859-1",
             engine="python",
-            dtype={"user_id": np.int32, "sex": "category", "age_group": "category", "occupation": "category", "zip_code": str},
+            dtype={
+                "user_id": np.int32,
+                "sex": "category",
+                "age_group": "category",
+                "occupation": "category",
+                "zip_code": str,
+            },
         )
 
         ratings = pd.read_csv(
@@ -56,7 +63,12 @@ class MovieLensSequenceDataset(Dataset):
             names=["user_id", "movie_id", "rating", "unix_timestamp"],
             encoding="ISO-8859-1",
             engine="python",
-            dtype={"user_id": np.int32, "movie_id": np.int32, "rating": np.int8, "unix_timestamp": np.int32},
+            dtype={
+                "user_id": np.int32,
+                "movie_id": np.int32,
+                "rating": np.int8,
+                "unix_timestamp": np.int32,
+            },
         )
 
         movies = pd.read_csv(
@@ -70,7 +82,7 @@ class MovieLensSequenceDataset(Dataset):
 
         return users, movies, ratings
 
-    def _generate_metadata(self, users, movies)-> MovieLensMetadata:
+    def _generate_metadata(self, users, movies) -> MovieLensMetadata:
         # user ids
         unique_user_ids = users["user_id"].unique()
         unique_user_ids.sort()
@@ -89,26 +101,39 @@ class MovieLensSequenceDataset(Dataset):
             user_id_tokens=user_id_tokens,
             movie_id_tokens=movie_id_tokens,
         )
-    
+
     def _add_tokens(self, users, movies, ratings):
         logger.info("Adding tokens to data")
         users["user_id_token"] = users["user_id"].map(self.metadata.user_id_tokens)
         movies["movie_id_token"] = movies["movie_id"].map(self.metadata.movie_id_tokens)
         ratings["user_id_token"] = ratings["user_id"].map(self.metadata.user_id_tokens)
-        ratings["movie_id_token"] = ratings["movie_id"].map(self.metadata.movie_id_tokens)
+        ratings["movie_id_token"] = ratings["movie_id"].map(
+            self.metadata.movie_id_tokens
+        )
         return users, movies, ratings
 
     def _generate_sequences(self, ratings, sequence_length, window_size):
         logger.info("Generating sequences")
-        
-        ratings_ordered = ratings[["user_id_token", "movie_id_token", "unix_timestamp", "rating"]].sort_values(
-            by="unix_timestamp").groupby("user_id_token").agg(list).reset_index()
-        
+
+        ratings_ordered = (
+            ratings[["user_id_token", "movie_id_token", "unix_timestamp", "rating"]]
+            .sort_values(by="unix_timestamp")
+            .groupby("user_id_token")
+            .agg(list)
+            .reset_index()
+        )
+
         def generate_row_sequences(row, sequence_length, window_size):
             movie_ids = torch.tensor(row.movie_id_token, dtype=torch.int32)
             ratings = torch.tensor(row.rating, dtype=torch.int8)
-            movie_input_sequences = movie_ids.ravel().unfold(0, sequence_length, window_size).to(torch.int32)
-            rating_input_sequences = ratings.ravel().unfold(0, sequence_length, window_size).to(torch.int8)
+            movie_input_sequences = (
+                movie_ids.ravel()
+                .unfold(0, sequence_length, window_size)
+                .to(torch.int32)
+            )
+            rating_input_sequences = (
+                ratings.ravel().unfold(0, sequence_length, window_size).to(torch.int8)
+            )
             return (movie_input_sequences, rating_input_sequences)
 
         movie_token_inputs_list = []
@@ -118,17 +143,29 @@ class MovieLensSequenceDataset(Dataset):
         rating_outputs_list = []
 
         for _, row in ratings_ordered.iterrows():
-            movie_sequences, rating_sequences = generate_row_sequences(row, sequence_length, window_size)
+            movie_sequences, rating_sequences = generate_row_sequences(
+                row, sequence_length, window_size
+            )
             movie_token_inputs_list.append(movie_sequences)
             rating_inputs_list.append(rating_sequences)
             user_id_tokens_list.append(row.user_id_token)
             movie_token_outputs_list.append(
-                torch.cat([movie_sequences[1:, -1], torch.tensor([EOS_TOKEN], dtype=torch.int32)])
+                torch.cat(
+                    [
+                        movie_sequences[1:, -1],
+                        torch.tensor([EOS_TOKEN], dtype=torch.int32),
+                    ]
+                )
             )
             rating_outputs_list.append(
-                torch.cat([rating_sequences[1:, -1], torch.tensor([EOS_RATING], dtype=torch.int8)])
+                torch.cat(
+                    [
+                        rating_sequences[1:, -1],
+                        torch.tensor([EOS_RATING], dtype=torch.int8),
+                    ]
+                )
             )
-        
+
         movie_token_inputs = torch.cat(movie_token_inputs_list)
         rating_inputs = torch.cat(rating_inputs_list)
         user_id_tokens = torch.tensor(user_id_tokens_list, dtype=torch.int32)
@@ -146,16 +183,16 @@ class MovieLensSequenceDataset(Dataset):
 
     def __len__(self):
         return self.data.length
-    
+
     def __getitem__(self, idx) -> MovieLensSequenceData:
         return (
-            self.data.movie_token_inputs[idx:idx+1],
-            self.data.rating_inputs[idx:idx+1],
-            self.data.user_id_tokens[idx:idx+1],
-            self.data.movie_token_outputs[idx:idx+1],
-            self.data.rating_outputs[idx:idx+1]
+            self.data.movie_token_inputs[idx],
+            self.data.rating_inputs[idx],
+            self.data.user_id_tokens[idx],
+            self.data.movie_token_outputs[idx],
+            self.data.rating_outputs[idx],
         )
-    
+
 
 if __name__ == "__main__":
     dataset = MovieLensSequenceDataset(
