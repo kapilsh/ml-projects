@@ -2,7 +2,7 @@ from torch.utils.data import Dataset, DataLoader
 from loguru import logger
 import pandas as pd
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import torch
 
 from dataclasses import dataclass
@@ -26,19 +26,35 @@ class MovieLensSequenceData:
     length: int
 
 
-EOS_TOKEN = -1  # end of sequence token
+EOS_MOVIE_ID = 0  # unknown movie id
+EOS_TOKEN = 0  # end of sequence token
 EOS_RATING = 2  # end of sequence rating (average rating)
 
 
 class MovieLensSequenceDataset(Dataset):
 
     def __init__(
-        self, movies_file, users_file, ratings_file, sequence_length, window_size=1
+        self,
+        movies_file: str,
+        users_file: str,
+        ratings_file: str,
+        sequence_length: int,
+        window_size: int = 1,
+        is_validation: bool = False,
+        validation_fraction: float = 0.1,
     ):
+        self.is_validation = is_validation
+        logger.info(
+            "Creating MovieLensSequenceDataset with validation set: %s", is_validation
+        )
         users, movies, ratings = self._read_data(movies_file, users_file, ratings_file)
         self.metadata = self._generate_metadata(users, movies)
         users, movies, ratings = self._add_tokens(users, movies, ratings)
-        self.data = self._generate_sequences(ratings, sequence_length, window_size)
+        data = self._generate_sequences(ratings, sequence_length, window_size)
+        train_data, validation_data = self._split_data(data, validation_fraction)
+        logger.info(f"Train data length: {train_data.length}")
+        logger.info(f"Validation data length: {validation_data.length}")
+        self.data = validation_data if is_validation else train_data
 
     def _read_data(self, movies_file, users_file, ratings_file):
         logger.info("Reading data from files")
@@ -88,7 +104,7 @@ class MovieLensSequenceDataset(Dataset):
         unique_user_ids.sort()
 
         # movie ids
-        unique_movie_ids = movies["movie_id"].unique()
+        unique_movie_ids = np.append(movies["movie_id"].unique(), [EOS_MOVIE_ID])
         unique_movie_ids.sort()
 
         # tokenization
@@ -126,15 +142,42 @@ class MovieLensSequenceDataset(Dataset):
         def generate_row_sequences(row, sequence_length, window_size):
             movie_ids = torch.tensor(row.movie_id_token, dtype=torch.int32)
             ratings = torch.tensor(row.rating, dtype=torch.int8)
-            movie_input_sequences = (
-                movie_ids.ravel()
-                .unfold(0, sequence_length, window_size)
-                .to(torch.int32)
+            padding_length = sequence_length - movie_ids.shape[0] % sequence_length
+            movie_ids = torch.cat(
+                (
+                    movie_ids,
+                    torch.tensor([EOS_TOKEN] * padding_length, dtype=torch.int32),
+                )
             )
-            rating_input_sequences = (
-                ratings.ravel().unfold(0, sequence_length, window_size).to(torch.int8)
+            ratings = torch.cat(
+                (
+                    ratings,
+                    torch.tensor([EOS_RATING] * padding_length, dtype=torch.int8),
+                )
             )
-            return (movie_input_sequences, rating_input_sequences)
+
+            movie_input_sequences = movie_ids.reshape(-1, sequence_length)
+            rating_input_sequences = ratings.reshape(-1, sequence_length)
+
+            movie_output_sequences = torch.cat(
+                (
+                    movie_ids[1:],
+                    torch.tensor([EOS_TOKEN], dtype=torch.int32),
+                )
+            ).reshape(-1, sequence_length)
+            rating_output_sequences = torch.cat(
+                (
+                    ratings[1:],
+                    torch.tensor([EOS_RATING], dtype=torch.int8),
+                )
+            ).reshape(-1, sequence_length)
+
+            return (
+                movie_input_sequences,
+                rating_input_sequences,
+                movie_output_sequences,
+                rating_output_sequences,
+            )
 
         movie_token_inputs_list = []
         rating_inputs_list = []
@@ -143,28 +186,14 @@ class MovieLensSequenceDataset(Dataset):
         rating_outputs_list = []
 
         for _, row in ratings_ordered.iterrows():
-            movie_sequences, rating_sequences = generate_row_sequences(
-                row, sequence_length, window_size
+            movies_input, rating_input, movie_output, rating_output = (
+                generate_row_sequences(row, sequence_length, window_size)
             )
-            movie_token_inputs_list.append(movie_sequences)
-            rating_inputs_list.append(rating_sequences)
-            user_id_tokens_list.append(row.user_id_token)
-            movie_token_outputs_list.append(
-                torch.cat(
-                    [
-                        movie_sequences[1:, -1],
-                        torch.tensor([EOS_TOKEN], dtype=torch.int32),
-                    ]
-                )
-            )
-            rating_outputs_list.append(
-                torch.cat(
-                    [
-                        rating_sequences[1:, -1],
-                        torch.tensor([EOS_RATING], dtype=torch.int8),
-                    ]
-                )
-            )
+            movie_token_inputs_list.append(movies_input)
+            rating_inputs_list.append(rating_input)
+            user_id_tokens_list.extend([row.user_id_token] * movies_input.shape[0])
+            movie_token_outputs_list.append(movie_output)
+            rating_outputs_list.append(rating_output)
 
         movie_token_inputs = torch.cat(movie_token_inputs_list)
         rating_inputs = torch.cat(rating_inputs_list)
@@ -178,8 +207,32 @@ class MovieLensSequenceDataset(Dataset):
             user_id_tokens=user_id_tokens,
             movie_token_outputs=movie_token_outputs,
             rating_outputs=rating_outputs,
-            length=len(user_id_tokens_list),
+            length=movie_token_inputs.shape[0],
         )
+
+    def _split_data(
+        self, data: MovieLensSequenceData, validation_fraction: float
+    ) -> Tuple[MovieLensSequenceData, MovieLensSequenceData]:
+        random_selection = torch.rand(len(data.movie_token_inputs)) <= (
+            1 - validation_fraction
+        )
+        train_data = MovieLensSequenceData(
+            movie_token_inputs=data.movie_token_inputs[random_selection],
+            rating_inputs=data.rating_inputs[random_selection],
+            user_id_tokens=data.user_id_tokens[random_selection],
+            movie_token_outputs=data.movie_token_outputs[random_selection],
+            rating_outputs=data.rating_outputs[random_selection],
+            length=random_selection.int().sum(),
+        )
+        validation_data = MovieLensSequenceData(
+            movie_token_inputs=data.movie_token_inputs[~random_selection],
+            rating_inputs=data.rating_inputs[~random_selection],
+            user_id_tokens=data.user_id_tokens[~random_selection],
+            movie_token_outputs=data.movie_token_outputs[~random_selection],
+            rating_outputs=data.rating_outputs[~random_selection],
+            length=(~random_selection).int().sum(),
+        )
+        return train_data, validation_data
 
     def __len__(self):
         return self.data.length
