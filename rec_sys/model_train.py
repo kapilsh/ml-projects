@@ -10,6 +10,7 @@ from dacite import from_dict
 from loguru import logger
 import numpy as np
 from tqdm import trange
+from torch.utils.tensorboard import SummaryWriter
 
 
 def load_config(config_file: str):
@@ -52,7 +53,7 @@ def train_step(
     return loss.item()
 
 
-def evaluation_step(
+def validation_step(
     movie_ids: torch.Tensor,
     user_ids: torch.Tensor,
     movie_targets: torch.Tensor,
@@ -73,15 +74,7 @@ def evaluation_step(
     return loss.item()
 
 
-def training_loop():
-    pass
-
-
-def run_model_training(config: dict):
-    device = config["trainer_config"]["device"]
-    if device == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA is not available")
-
+def get_dataset(config) -> Dataset:
     movies_file = os.path.join(config["trainer_config"]["data_dir"], "movies.dat")
     users_file = os.path.join(config["trainer_config"]["data_dir"], "users.dat")
     ratings_file = os.path.join(config["trainer_config"]["data_dir"], "ratings.dat")
@@ -93,22 +86,33 @@ def run_model_training(config: dict):
         sequence_length=config["movie_transformer_config"]["context_window_size"],
         window_size=1,  # next token prediction with sliding window of 1
     )
+    return dataset
+
+
+def get_model_config(config: dict, dataset: Dataset) -> MovieLensTransformerConfig:
+    config["movie_transformer_config"]["vocab_size"] = len(
+        dataset.metadata.unique_movie_ids
+    )
+    config["num_users"] = len(dataset.metadata.unique_user_ids)
+    model_config = from_dict(data_class=MovieLensTransformerConfig, data=config)
+    logger.info(f"Model config:\n ========== \n{model_config} \n ==========")
+    return model_config
+
+
+def run_model_training(config: dict):
+    device = config["trainer_config"]["device"]
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA is not available")
+
+    dataset = get_dataset(config)
     train_dataloader = DataLoader(
         dataset, batch_size=config["trainer_config"]["batch_size"], shuffle=True
     )
     validation_dataloader = DataLoader(
         dataset, batch_size=config["trainer_config"]["batch_size"], shuffle=False
     )
-    # import ipdb
 
-    # ipdb.set_trace()
-    config["movie_transformer_config"]["vocab_size"] = len(
-        dataset.metadata.unique_movie_ids
-    )
-    config["num_users"] = len(dataset.metadata.unique_user_ids)
-    model_config = from_dict(data_class=MovieLensTransformerConfig, data=config)
-
-    logger.info(f"Model config:\n ========== \n{model_config} \n ==========")
+    model_config = get_model_config(config, dataset)
 
     model = MovieLensTransformer(config=model_config)
 
@@ -121,6 +125,10 @@ def run_model_training(config: dict):
     )
 
     best_validation_loss = np.inf
+
+    writer = SummaryWriter(
+        log_dir=config["trainer_config"]["tensorboard_dir"], flush_secs=30
+    )
 
     for epoch in range(config["trainer_config"]["num_epochs"]):
         model.train()
@@ -150,15 +158,16 @@ def run_model_training(config: dict):
                 f"[Epoch = {epoch}] Current training loss (loss = {np.round(loss, 4)})"
             )
             pbar.refresh()
+
         pbar.close()
-        logger.info(
-            f"Epoch {epoch}, Loss: {np.round(total_loss / len(train_dataloader), 4)}"
-        )
+        train_loss = total_loss / len(train_dataloader)
+        logger.info(f"Epoch {epoch}, Loss: {np.round(train_loss, 4)}")
+        writer.add_scalar("loss/train", train_loss, epoch)
 
         model.eval()
         total_loss = 0.0
 
-        pbar = trange(len(train_dataloader))
+        pbar = trange(len(validation_dataloader))
         pbar.ncols = 150
         for i, (
             movie_ids,
@@ -167,7 +176,7 @@ def run_model_training(config: dict):
             movie_targets,
             rating_targets,
         ) in enumerate(validation_dataloader):
-            loss = evaluation_step(
+            loss = validation_step(
                 movie_ids,
                 user_ids,
                 movie_targets,
@@ -181,10 +190,12 @@ def run_model_training(config: dict):
                 f"[Epoch = {epoch}] Current validation loss (loss = {np.round(loss, 4)})"
             )
             pbar.refresh()
+
         pbar.close()
 
         validation_loss = total_loss / len(validation_dataloader)
         logger.info(f"Validation Loss: {np.round(validation_loss, 4)}")
+        writer.add_scalar("loss/validation", validation_loss, epoch)
 
         if validation_loss < best_validation_loss:
             best_validation_loss = validation_loss

@@ -41,3 +41,4 @@ dlrm/.DS_Store
 .vscode/
 rec_sys/__pycache__/
 /rec_sys/models/
+/rec_sys/runs/
