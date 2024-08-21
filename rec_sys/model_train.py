@@ -9,6 +9,7 @@ import torch.nn as nn
 from dacite import from_dict
 from loguru import logger
 import numpy as np
+from tqdm import trange
 
 
 def load_config(config_file: str):
@@ -108,19 +109,25 @@ def run_model_training(config: dict):
     model_config = from_dict(data_class=MovieLensTransformerConfig, data=config)
 
     logger.info(f"Model config:\n ========== \n{model_config} \n ==========")
+
     model = MovieLensTransformer(config=model_config)
 
     init_weights(model)
     model.to(device)
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config["trainer_config"]["starting_learning_rate"]
     )
 
+    best_validation_loss = np.inf
+
     for epoch in range(config["trainer_config"]["num_epochs"]):
         model.train()
         total_loss = 0.0
 
+        pbar = trange(len(train_dataloader))
+        pbar.ncols = 150
         for i, (
             movie_ids,
             rating_ids,
@@ -138,8 +145,12 @@ def run_model_training(config: dict):
                 device,
             )
             total_loss += loss
-            # if i % 10 == 0:
-            #     logger.info(f"Epoch {epoch}, Batch {i}, Loss: {np.round(loss, 4)}")
+            pbar.update(1)
+            pbar.set_description(
+                f"[Epoch = {epoch}] Current training loss (loss = {np.round(loss, 4)})"
+            )
+            pbar.refresh()
+        pbar.close()
         logger.info(
             f"Epoch {epoch}, Loss: {np.round(total_loss / len(train_dataloader), 4)}"
         )
@@ -147,6 +158,8 @@ def run_model_training(config: dict):
         model.eval()
         total_loss = 0.0
 
+        pbar = trange(len(train_dataloader))
+        pbar.ncols = 150
         for i, (
             movie_ids,
             rating_ids,
@@ -163,13 +176,24 @@ def run_model_training(config: dict):
                 device,
             )
             total_loss += loss
-            # if i % 10 == 0:
-            #     logger.info(
-            #         f"Epoch {epoch}, Batch {i}, Validation Loss: {np.round(loss, 4)}"
-            #     )
-        logger.info(
-            f"Validation Loss: {np.round(total_loss / len(validation_dataloader), 4)}"
-        )
+            pbar.update(1)
+            pbar.set_description(
+                f"[Epoch = {epoch}] Current validation loss (loss = {np.round(loss, 4)})"
+            )
+            pbar.refresh()
+        pbar.close()
+
+        validation_loss = total_loss / len(validation_dataloader)
+        logger.info(f"Validation Loss: {np.round(validation_loss, 4)}")
+
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+            if not os.path.exists(config["trainer_config"]["model_dir"]):
+                os.makedirs(config["trainer_config"]["model_dir"])
+            torch.save(
+                model.state_dict(),
+                os.path.join(config["trainer_config"]["model_dir"], "model.pth"),
+            )
 
 
 @click.command()

@@ -1,18 +1,18 @@
 trainer_config:
   data_dir: ./data/ml-1m
   model_dir: ./models
-  batch_size: 64
-  starting_learning_rate: 0.0001
+  batch_size: 256
+  starting_learning_rate: 0.0003
   learning_rate_decay: 0.95
-  device: cpu
-  num_epochs: 100
+  device: cuda
+  num_epochs: 1000
   validation_fraction: 0.15
 
 movie_transformer_config:
   context_window_size: 5
   embedding_dimension: 32
-  num_layers: 2
-  num_heads: 2
+  num_layers: 4
+  num_heads: 4
   dropout_embeddings: 0.1
   dropout_attention: 0.1
   dropout_residual: 0.1

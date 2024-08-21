@@ -40,3 +40,4 @@ dlrm/.DS_Store
 .virtual_documents/
 .vscode/
 rec_sys/__pycache__/
+/rec_sys/models/
