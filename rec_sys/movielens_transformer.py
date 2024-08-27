@@ -14,18 +14,25 @@ class MovieLensTransformerConfig:
 
 
 class InteractionMLP(nn.Module):
-    def __init__(self, input_size: int, hidden_sizes: List[int], output_size: int):
+    def __init__(
+        self,
+        input_size: int,
+        sequence_length: int,
+        hidden_sizes: List[int],
+        output_size: int,
+    ):
         super(InteractionMLP, self).__init__()
+        actual_input_size = input_size * sequence_length
         fc_layers = []
         for i, hidden_size in enumerate(hidden_sizes):
             if i == 0:
-                fc_layers.append(nn.Linear(input_size, hidden_size))
+                fc_layers.append(nn.Linear(actual_input_size, hidden_size))
             else:
                 fc_layers.append(nn.Linear(hidden_sizes[i - 1], hidden_size))
             fc_layers.append(nn.ReLU())
         fc_layers.append(
             nn.Linear(
-                hidden_sizes[-1] if hidden_sizes else input_size,
+                hidden_sizes[-1] if hidden_sizes else actual_input_size,
                 output_size,
                 bias=False,
             )
@@ -33,6 +40,7 @@ class InteractionMLP(nn.Module):
         self.fc_layers = nn.Sequential(*fc_layers)
 
     def forward(self, x: torch.Tensor):
+        x = x.view(x.size(0), -1)
         return self.fc_layers(x)
 
 
@@ -43,10 +51,12 @@ class MovieLensTransformer(nn.Module):
         self.user_embedding = nn.Embedding(
             config.num_users, config.user_embedding_dimension
         )
-
         self.output_layer = InteractionMLP(
-            config.movie_transformer_config.embedding_dimension
-            + config.user_embedding_dimension,
+            (
+                config.movie_transformer_config.embedding_dimension
+                + config.user_embedding_dimension
+            ),
+            config.movie_transformer_config.context_window_size,
             config.interaction_mlp_hidden_sizes,
             config.movie_transformer_config.vocab_size,
         )

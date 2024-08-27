@@ -1,8 +1,8 @@
 trainer_config:
   data_dir: ./data/ml-1m
   model_dir: ./models
-  batch_size: 256
-  starting_learning_rate: 0.0003
+  batch_size: 512
+  starting_learning_rate: 0.0005
   learning_rate_decay: 0.95
   device: cuda
   num_epochs: 1000

@@ -40,7 +40,7 @@ def test_forward_pass(model):
     movie_ids = torch.randint(0, 10, (2, 4))
     user_ids = torch.randint(0, 4, (2,))
     output = model(movie_ids, user_ids)
-    assert output.shape == (2, 4, 10)  # batch_size, sequence_length, vocab_size
+    assert output.shape == (2, 10)  # batch_size, sequence_length, vocab_size
 
 
 if __name__ == "__main__":
