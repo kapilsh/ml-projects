@@ -8,6 +8,49 @@ import torch
 from dataclasses import dataclass
 
 
+def read_movielens_data(movies_file: str, users_file: str, ratings_file: str):
+    logger.info("Reading data from files")
+    users = pd.read_csv(
+        users_file,
+        sep="::",
+        names=["user_id", "sex", "age_group", "occupation", "zip_code"],
+        encoding="ISO-8859-1",
+        engine="python",
+        dtype={
+            "user_id": np.int32,
+            "sex": "category",
+            "age_group": "category",
+            "occupation": "category",
+            "zip_code": str,
+        },
+    )
+
+    ratings = pd.read_csv(
+        ratings_file,
+        sep="::",
+        names=["user_id", "movie_id", "rating", "unix_timestamp"],
+        encoding="ISO-8859-1",
+        engine="python",
+        dtype={
+            "user_id": np.int32,
+            "movie_id": np.int32,
+            "rating": np.int8,
+            "unix_timestamp": np.int32,
+        },
+    )
+
+    movies = pd.read_csv(
+        movies_file,
+        sep="::",
+        names=["movie_id", "title", "genres"],
+        encoding="ISO-8859-1",
+        engine="python",
+        dtype={"movie_id": np.int32, "title": str, "genres": str},
+    )
+
+    return users, movies, ratings
+
+
 @dataclass
 class MovieLensMetadata:
     unique_user_ids: List[int]
@@ -46,7 +89,9 @@ class MovieLensSequenceDataset(Dataset):
         logger.info(
             "Creating MovieLensSequenceDataset with validation set: %s", is_validation
         )
-        users, movies, ratings = self._read_data(movies_file, users_file, ratings_file)
+        users, movies, ratings = read_movielens_data(
+            movies_file, users_file, ratings_file
+        )
         self.metadata = self._generate_metadata(users, movies)
 
         users, movies, ratings = self._add_tokens(users, movies, ratings)
@@ -65,48 +110,6 @@ class MovieLensSequenceDataset(Dataset):
         logger.info(f"Train data length: {train_data.length}")
         logger.info(f"Validation data length: {validation_data.length}")
         self.data = validation_data if is_validation else train_data
-
-    def _read_data(self, movies_file, users_file, ratings_file):
-        logger.info("Reading data from files")
-        users = pd.read_csv(
-            "./data/ml-1m/users.dat",
-            sep="::",
-            names=["user_id", "sex", "age_group", "occupation", "zip_code"],
-            encoding="ISO-8859-1",
-            engine="python",
-            dtype={
-                "user_id": np.int32,
-                "sex": "category",
-                "age_group": "category",
-                "occupation": "category",
-                "zip_code": str,
-            },
-        )
-
-        ratings = pd.read_csv(
-            "./data/ml-1m/ratings.dat",
-            sep="::",
-            names=["user_id", "movie_id", "rating", "unix_timestamp"],
-            encoding="ISO-8859-1",
-            engine="python",
-            dtype={
-                "user_id": np.int32,
-                "movie_id": np.int32,
-                "rating": np.int8,
-                "unix_timestamp": np.int32,
-            },
-        )
-
-        movies = pd.read_csv(
-            "./data/ml-1m/movies.dat",
-            sep="::",
-            names=["movie_id", "title", "genres"],
-            encoding="ISO-8859-1",
-            engine="python",
-            dtype={"movie_id": np.int32, "title": str, "genres": str},
-        )
-
-        return users, movies, ratings
 
     def _generate_metadata(self, users, movies) -> MovieLensMetadata:
         # user ids
