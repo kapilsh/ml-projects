@@ -1,0 +1,23 @@
+trainer_config:
+  data_dir: ./data/ml-1m
+  model_dir: ./models
+  batch_size: 512
+  starting_learning_rate: 0.0005
+  learning_rate_decay: 0.95
+  device: cuda
+  num_epochs: 1000
+  validation_fraction: 0.15
+  tensorboard_dir: ./runs
+
+movie_transformer_config:
+  context_window_size: 5
+  embedding_dimension: 32
+  num_layers: 4
+  num_heads: 4
+  dropout_embeddings: 0.1
+  dropout_attention: 0.1
+  dropout_residual: 0.1
+  layer_norm_epsilon: 0.00001
+user_embedding_dimension: 32
+interaction_mlp_hidden_sizes:
+  - 16
