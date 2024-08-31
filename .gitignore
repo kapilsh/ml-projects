@@ -33,12 +33,12 @@ pytorch_cpp/third-party
 dlrm/.DS_Store
 .DS_Store
 
-/rec_sys/.ipynb_checkpoints/
-/rec_sys/data/.ipynb_checkpoints/
-/rec_sys/data/ml-1m/.ipynb_checkpoints/
-/rec_sys/data/ref_post_medium.pdf
+/recoformer/.ipynb_checkpoints/
+/recoformer/data/.ipynb_checkpoints/
+/recoformer/data/ml-1m/.ipynb_checkpoints/
+/recoformer/data/ref_post_medium.pdf
 .virtual_documents/
 .vscode/
 rec_sys/__pycache__/
-/rec_sys/models/
-/rec_sys/runs/
+/recoformer/models/
+/recoformer/runs/
