@@ -39,6 +39,8 @@ dlrm/.DS_Store
 /recoformer/data/ref_post_medium.pdf
 .virtual_documents/
 .vscode/
-rec_sys/__pycache__/
+/recoformer/models/
+/recoformer/runs/
+/recoformer/__pycache__/
 /recoformer/models/
 /recoformer/runs/
